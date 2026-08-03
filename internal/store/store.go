@@ -1,0 +1,140 @@
+// Package store manages the on-disk category folders and the notes inside
+// them: scanning, resolving paths, and reclassifying.
+package store
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/polymorcodeus/park/internal/config"
+	"github.com/polymorcodeus/park/internal/note"
+)
+
+// Item is a single parked note as seen by the scanner/TUI.
+type Item struct {
+	Path        string
+	Filename    string
+	Frontmatter note.Frontmatter
+	ModTime     time.Time
+}
+
+// Init creates the category folders defined in cfg and returns a summary
+// message for the caller to display.
+func Init(cfg *config.Config) (string, error) {
+	for _, cl := range cfg.Categories {
+		if err := os.MkdirAll(cl.Path, 0o755); err != nil {
+			return "", fmt.Errorf("create category folder %q: %w", cl.Path, err)
+		}
+	}
+
+	msg := fmt.Sprintf("initialized park folders (%s) under configured paths", strings.Join(cfg.CategoryNames(), "/"))
+	return msg, nil
+}
+
+// Scan lists all markdown files under a given category folder, sorted oldest
+// first (so the longest-neglected items surface at the top).
+func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
+	cl, ok := cfg.CategoryByName(categoryName)
+	if !ok {
+		return nil, fmt.Errorf("unknown category %q — valid: %s", categoryName, strings.Join(cfg.CategoryNames(), ", "))
+	}
+
+	entries, err := os.ReadDir(cl.Path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read category folder %q: %w", cl.Path, err)
+	}
+
+	var items []Item
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(cl.Path, e.Name())
+		fm, _, err := note.ParseFrontmatter(path)
+		if err != nil {
+			return nil, fmt.Errorf("parse frontmatter for %q: %w", path, err)
+		}
+		info, err := e.Info()
+		if err != nil {
+			return nil, fmt.Errorf("stat %q: %w", path, err)
+		}
+		items = append(items, Item{
+			Path:        path,
+			Filename:    e.Name(),
+			Frontmatter: fm,
+			ModTime:     info.ModTime(),
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].ModTime.Before(items[j].ModTime)
+	})
+	return items, nil
+}
+
+// Reclassify moves a file (looked up by filename across all category folders)
+// into the target category folder and rewrites its frontmatter category field
+// to match. This is the "triage decision" primitive everything else builds on.
+func Reclassify(cfg *config.Config, filename string, targetCategory string) error {
+	cl, ok := cfg.CategoryByName(targetCategory)
+	if !ok {
+		return fmt.Errorf("unknown category %q — valid: %s", targetCategory, strings.Join(cfg.CategoryNames(), ", "))
+	}
+
+	var src string
+	var fm note.Frontmatter
+	var body string
+	for _, c := range cfg.Categories {
+		candidate := filepath.Join(c.Path, filename)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			src = candidate
+			var parseErr error
+			fm, body, parseErr = note.ParseFrontmatter(candidate)
+			if parseErr != nil {
+				return fmt.Errorf("parse frontmatter for %q: %w", candidate, parseErr)
+			}
+			break
+		}
+	}
+	if src == "" {
+		return os.ErrNotExist
+	}
+
+	if filepath.Dir(src) == cl.Path {
+		return fmt.Errorf("already in %s", targetCategory)
+	}
+
+	fm.Category = targetCategory
+	dst := filepath.Join(cl.Path, filename)
+
+	// Rewrite frontmatter in place first, then move — if the move fails
+	// (e.g. cross-device), the file is still left in a consistent state.
+	if err := note.WriteFrontmatter(src, fm, body); err != nil {
+		return fmt.Errorf("rewrite frontmatter for %q: %w", src, err)
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return fmt.Errorf("move %q to %q: %w", src, dst, err)
+	}
+	return nil
+}
+
+// ResolvePath accepts either a bare filename (searched across all category
+// folders) or a full path used as-is.
+func ResolvePath(cfg *config.Config, filename string) string {
+	if _, err := os.Stat(filename); err == nil {
+		return filename
+	}
+	for _, cl := range cfg.Categories {
+		p := filepath.Join(cl.Path, filename)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filename
+}

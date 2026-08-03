@@ -1,0 +1,379 @@
+package model
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/polymorcodeus/park/internal/config"
+	"github.com/polymorcodeus/park/internal/store"
+)
+
+// listItem adapts an Item to bubbles/list's list.Item interface.
+type listItem struct {
+	item store.Item
+}
+
+func (i listItem) Title() string {
+	created, _ := time.Parse("2006-01-02", i.item.Frontmatter.Created)
+	if created.IsZero() {
+		created = i.item.ModTime
+	}
+	return fmt.Sprintf("%s  ·  %s", i.item.Filename, humanAge(created))
+}
+func (i listItem) Description() string { return i.item.Frontmatter.Synopsis }
+func (i listItem) FilterValue() string {
+	return i.item.Filename + " " + i.item.Frontmatter.Synopsis
+}
+
+// styledDelegate returns a list.DefaultDelegate with the themed foreground colors.
+func (s *styles) styledDelegate() list.DefaultDelegate {
+	d := list.NewDefaultDelegate()
+	d.Styles.NormalTitle = d.Styles.NormalTitle.Foreground(s.listNormalTitle.GetForeground())
+	d.Styles.NormalDesc = d.Styles.NormalDesc.Foreground(s.listNormalDesc.GetForeground())
+	d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(s.listSelectedTitle.GetForeground())
+	d.Styles.SelectedDesc = d.Styles.SelectedDesc.Foreground(s.listSelectedDesc.GetForeground())
+	d.Styles.DimmedTitle = d.Styles.DimmedTitle.Foreground(s.listDimmedTitle.GetForeground())
+	d.Styles.DimmedDesc = d.Styles.DimmedDesc.Foreground(s.listDimmedDesc.GetForeground())
+	return d
+}
+
+func humanAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < 24*time.Hour:
+		return "today"
+	case d < 48*time.Hour:
+		return "yesterday"
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+// keyMap defines the key bindings for the park TUI.
+type keyMap struct {
+	View             key.Binding
+	CycleNext        key.Binding
+	CyclePrev        key.Binding
+	CategoryBindings []key.Binding
+	Help             key.Binding
+	Quit             key.Binding
+}
+
+// Primary returns navigation shortcuts shown in the collapsed help bar.
+func (k keyMap) Primary() []key.Binding {
+	return []key.Binding{k.View, k.CycleNext, k.CyclePrev, k.Help, k.Quit}
+}
+
+// Categories returns reclassify/category action shortcuts shown only in full help.
+func (k keyMap) Categories() []key.Binding {
+	return k.CategoryBindings
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return k.Primary()
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		k.Primary(),
+		k.Categories(),
+	}
+}
+
+var keys = keyMap{
+	View: key.NewBinding(
+		key.WithKeys("enter", "v"),
+		key.WithHelp("enter/v", "view"),
+	),
+	CycleNext: key.NewBinding(
+		key.WithKeys("right", "l", "ctrl+n"),
+		key.WithHelp("→/l", "next category"),
+	),
+	CyclePrev: key.NewBinding(
+		key.WithKeys("left", "h", "ctrl+p"),
+		key.WithHelp("←/h", "prev category"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "toggle help"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("q", "ctrl+c"),
+		key.WithHelp("q/ctrl+c", "quit"),
+	),
+}
+
+// newKeyMap builds a keyMap from the static bindings plus one reclassify binding per
+// configured category that has a non-empty Key.
+func newKeyMap(cfg *config.Config) keyMap {
+	km := keys
+	km.CategoryBindings = make([]key.Binding, 0, len(cfg.Categories))
+	for _, cl := range cfg.Categories {
+		if cl.Key == "" {
+			continue
+		}
+		km.CategoryBindings = append(km.CategoryBindings, key.NewBinding(
+			key.WithKeys(cl.Key),
+			key.WithHelp(cl.Key, cl.Name),
+		))
+	}
+	return km
+}
+
+// AssistModel is the bubbletea model for the park TUI with tabbed category navigation.
+type AssistModel struct {
+	list        list.Model
+	categoryIdx int
+	cfg         *config.Config
+	err         error
+	ViewFile    string
+	styles      *styles
+	help        help.Model
+	keys        keyMap
+	width       int
+}
+
+func NewAssistModel(cfg *config.Config) (AssistModel, error) {
+	idx := -1
+	for i, cl := range cfg.Categories {
+		if cl.Name == cfg.DefaultCategory {
+			idx = i
+			break
+		}
+	}
+
+	s := newStyles()
+	delegate := s.styledDelegate()
+
+	m := AssistModel{
+		categoryIdx: idx,
+		cfg:         cfg,
+		keys:        newKeyMap(cfg),
+		help:        help.New(),
+		styles:      s,
+		list:        list.New(nil, delegate, minWidth, minHeight),
+		width:       minWidth,
+	}
+	m.list.SetFilteringEnabled(true)
+	m.list.SetShowHelp(false)
+	m.list.SetShowTitle(false)
+	m.list.SetShowStatusBar(false)
+	categoryName := cfg.Categories[idx].Name
+	items, err := store.Scan(cfg, categoryName)
+	if err != nil {
+		return AssistModel{}, err
+	}
+	listItems := make([]list.Item, len(items))
+	for i, it := range items {
+		listItems[i] = listItem{item: it}
+	}
+	m.list.SetItems(listItems)
+	// m.list.Title = fmt.Sprintf("%s (%d)", categoryName, len(listItems))
+
+	return m, nil
+}
+
+func (m AssistModel) switchCategory(delta int) AssistModel {
+	m.categoryIdx += delta
+	if m.categoryIdx < 0 {
+		m.categoryIdx = len(m.cfg.Categories) - 1
+	} else if m.categoryIdx >= len(m.cfg.Categories) {
+		m.categoryIdx = 0
+	}
+	return m
+}
+
+// itemsLoadedMsg carries the items for a category after an async load.
+type itemsLoadedMsg struct {
+	categoryName string
+	items        []list.Item
+}
+
+// errMsg carries a load error back to Update.
+type errMsg struct {
+	categoryName string
+	err          error
+}
+
+// reclassifiedMsg signals that the selected item was moved to a new category.
+type reclassifiedMsg struct{ item listItem }
+
+// reclassifyErrMsg carries an error from an async reclassify command.
+type reclassifyErrMsg struct{ err error }
+
+func (m *AssistModel) loadItemsCmd() tea.Cmd {
+	categoryName := m.cfg.Categories[m.categoryIdx].Name
+	cfg := m.cfg
+	return func() tea.Msg {
+		items, err := store.Scan(cfg, categoryName)
+		if err != nil {
+			return errMsg{categoryName: categoryName, err: err}
+		}
+		listItems := make([]list.Item, len(items))
+		for i, it := range items {
+			listItems[i] = listItem{item: it}
+		}
+		return itemsLoadedMsg{categoryName: categoryName, items: listItems}
+	}
+}
+
+func (m *AssistModel) reclassifyCmd(targetCategory string) tea.Cmd {
+	it, ok := m.list.SelectedItem().(listItem)
+	if !ok {
+		return func() tea.Msg {
+			return reclassifyErrMsg{err: fmt.Errorf("no item selected")}
+		}
+	}
+	filename := it.item.Filename
+	cfg := m.cfg
+	return func() tea.Msg {
+		if err := store.Reclassify(cfg, filename, targetCategory); err != nil {
+			return reclassifyErrMsg{err: err}
+		}
+		return reclassifiedMsg{item: it}
+	}
+}
+
+func (m AssistModel) removeItem(target listItem) AssistModel {
+	for i, it := range m.list.Items() {
+		if li, ok := it.(listItem); ok && li.item.Path == target.item.Path {
+			m.list.RemoveItem(i)
+			return m
+		}
+	}
+	return m
+}
+
+func (m AssistModel) Init() tea.Cmd { return nil }
+
+// keeps assist and new TUI screens approx same size
+const maxListHeight = 28
+
+func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = min(minWidth, msg.Width)
+		m.help.SetWidth(msg.Width)
+		m.list.SetSize(msg.Width, maxListHeight)
+
+	case itemsLoadedMsg:
+		currentCategory := m.cfg.Categories[m.categoryIdx].Name
+		if msg.categoryName != currentCategory {
+			return m, nil
+		}
+		m.list.SetItems(msg.items)
+		m.list.Title = fmt.Sprintf("%s (%d)", currentCategory, len(msg.items))
+		m.err = nil
+		return m, nil
+
+	case errMsg:
+		if msg.categoryName != m.cfg.Categories[m.categoryIdx].Name {
+			return m, nil
+		}
+		m.err = msg.err
+		return m, nil
+
+	case reclassifiedMsg:
+		m = m.removeItem(msg.item)
+		m.err = nil
+		return m, nil
+
+	case reclassifyErrMsg:
+		m.err = msg.err
+		return m, nil
+
+	case tea.KeyPressMsg:
+		m.err = nil
+		switch {
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.View):
+			if it, ok := m.list.SelectedItem().(listItem); ok {
+				m.ViewFile = it.item.Path
+				return m, tea.Quit
+			}
+		case key.Matches(msg, m.keys.CycleNext):
+			m = m.switchCategory(+1)
+			return m, m.loadItemsCmd()
+		case key.Matches(msg, m.keys.CyclePrev):
+			m = m.switchCategory(-1)
+			return m, m.loadItemsCmd()
+		case key.Matches(msg, m.keys.Help):
+			m.help.ShowAll = !m.help.ShowAll
+			return m, nil
+		default:
+			if m.list.SettingFilter() {
+				break
+			}
+			if cl, ok := m.cfg.CategoryByKey(msg.String()); ok {
+				currentCategory := m.cfg.Categories[m.categoryIdx].Name
+				if cl.Name == currentCategory {
+					m.err = fmt.Errorf("already in %s", cl.Name)
+					return m, nil
+				}
+				return m, m.reclassifyCmd(cl.Name)
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m AssistModel) View() tea.View {
+	if m.styles == nil {
+		return tea.NewView("")
+	}
+
+	doc := strings.Builder{}
+	s := m.styles
+
+	var renderedTabs []string
+	for i, cl := range m.cfg.Categories {
+		var style lipgloss.Style
+		isActive := i == m.categoryIdx
+		if isActive {
+			style = s.activeTab
+		} else {
+			style = s.inactiveTab
+		}
+
+		renderedTabs = append(renderedTabs, style.Render(cl.Name))
+	}
+
+	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
+
+	gapWidth := max(0, m.width-lipgloss.Width(row))
+	gap := s.topBorder.Render(strings.Repeat(" ", gapWidth))
+	header := lipgloss.JoinHorizontal(lipgloss.Bottom, row, gap)
+
+	doc.WriteString(header)
+	doc.WriteString("\n")
+	doc.WriteString(m.list.View())
+
+	var footer string
+	{
+		if m.help.ShowAll {
+			helpTitle := s.highlight.Render("set item category")
+			footer += s.window.Width(m.width).Render(helpTitle)
+		}
+		footer += s.window.Width(m.width).Render(m.help.View(m.keys))
+		if m.err != nil {
+			errorText := s.errorText.Render(m.err.Error())
+			footer += s.window.Width(m.width).Render(errorText)
+		}
+	}
+
+	doc.WriteString(footer)
+
+	v := tea.NewView(s.doc.Render(doc.String()))
+	v.AltScreen = true
+	return v
+}

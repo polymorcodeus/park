@@ -149,11 +149,11 @@ func DefaultConfigPath() string {
 // DefaultRootPath returns the park root directory.
 //
 // Resolution order:
-//   1. $XDG_CONFIG_HOME/park if $XDG_CONFIG_HOME is set.
-//   2. os.UserConfigDir()/park, following the OS convention
-//      (e.g. ~/Library/Application Support/park on macOS,
-//      ~/.config/park on Linux and other Unix systems).
-//   3. $HOME/.config/park if os.UserConfigDir fails.
+//  1. $XDG_CONFIG_HOME/park if $XDG_CONFIG_HOME is set.
+//  2. os.UserConfigDir()/park, following the OS convention
+//     (e.g. ~/Library/Application Support/park on macOS,
+//     ~/.config/park on Linux and other Unix systems).
+//  3. $HOME/.config/park if os.UserConfigDir fails.
 func DefaultRootPath() string {
 	if os.Getenv("XDG_CONFIG_HOME") == "" {
 		rootDir, err := os.UserConfigDir()

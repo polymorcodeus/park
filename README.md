@@ -1,3 +1,9 @@
+<p align="center">
+  <source media="(prefers-color-scheme: dark)" srcset="images/park-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="images/park-light.png">
+  <img alt="Project Logo" src="images/park-dark.png" width="128">
+</p>
+
 # park
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/polymorcodeus/park)](https://go.dev/) [![Build Status](https://img.shields.io/github/actions/workflow/status/polymorcodeus/park/ci.yml?branch=main)](https://github.com/polymorcodeus/park/actions) [![Go Report Card](https://goreportcard.com/badge/github.com/polymorcodeus/park)](https://goreportcard.com/report/github.com/polymorcodeus/park)

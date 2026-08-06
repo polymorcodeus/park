@@ -352,11 +352,34 @@ func AddNote(cfg *config.Config, in NoteInput) (NoteOutcome, error) {
 	}
 
 	hasInput := in.Body != "" || in.FromFile != ""
+	hasMetadata := fieldSet(in.Filename) && fieldSet(in.Synopsis) && fieldSet(in.Source)
+
+	if hasInput && hasMetadata {
+		// Caller supplied all required metadata and a body; create the note
+		// directly. Strip any frontmatter in the body so it isn't duplicated
+		// by WriteFrontmatter; if there is no frontmatter, keep the body as-is.
+		body := in.Body
+		if _, parsed, hasFM := ParseFrontmatterString(in.Body); hasFM {
+			body = parsed
+		}
+		var path string
+		var err error
+		if in.FromFile != "" {
+			path, err = IngestFile(cfg, in.FromFile, in.Filename, in.Synopsis, in.Source, target, body)
+		} else {
+			path, err = NewWithBody(cfg, in.Filename, in.Synopsis, in.Source, target, body)
+		}
+		if err != nil {
+			return NoteOutcome{}, err
+		}
+		return NoteOutcome{Path: path}, nil
+	}
+
 	if hasInput {
 		return addFromInput(cfg, in, target)
 	}
 
-	if fieldSet(in.Filename) && fieldSet(in.Synopsis) && fieldSet(in.Source) {
+	if hasMetadata {
 		path, err := NewWithBody(cfg, in.Filename, in.Synopsis, in.Source, target, "")
 		if err != nil {
 			return NoteOutcome{}, err

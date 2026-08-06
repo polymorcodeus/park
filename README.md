@@ -6,7 +6,7 @@
 
 # park
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/polymorcodeus/park)](https://go.dev/) [![Build Status](https://img.shields.io/github/actions/workflow/status/polymorcodeus/park/ci.yml?branch=main)](https://github.com/polymorcodeus/park/actions) [![Go Report Card](https://goreportcard.com/badge/github.com/polymorcodeus/park)](https://goreportcard.com/report/github.com/polymorcodeus/park)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/polymorcodeus/park)](https://go.dev/) [![Build Status](https://img.shields.io/github/actions/workflow/status/polymorcodeus/park/ci.yml?branch=main)](https://github.com/polymorcodeus/park/actions)
 
 **A parking lot for markdown notes, organized as IPAA (Inbox / Projects / Areas / Archive).**
 

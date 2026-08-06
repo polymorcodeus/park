@@ -468,3 +468,30 @@ func TestAddNote(t *testing.T) {
 		}
 	})
 }
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "Book Todo Legacy", "book-todo-legacy"},
+		{"already slug", "book-todo-legacy", "book-todo-legacy"},
+		{"with markdown extension", "book-todo-legacy.md", "book-todo-legacy"},
+		{"with uppercase markdown extension", "book-todo-legacy.MD", "book-todo-legacy"},
+		{"mixed case extension", "book-todo-legacy.Md", "book-todo-legacy"},
+		{"with date", "Book Todo Legacy 2026-08-06", "book-todo-legacy-2026-08-06"},
+		{"with date and extension", "Book Todo Legacy 2026-08-06.md", "book-todo-legacy-2026-08-06"},
+		{"trailing spaces", "  book-todo-legacy.md  ", "book-todo-legacy"},
+		{"empty becomes empty", "", ""},
+		{"only extension", ".md", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := slugify(tt.in)
+			if got != tt.want {
+				t.Errorf("slugify(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

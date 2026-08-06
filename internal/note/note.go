@@ -258,6 +258,7 @@ func IngestFile(cfg *config.Config, srcPath, filename, synopsis, source, targetC
 
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
+	s, _ = strings.CutSuffix(s, ".md")
 	var b strings.Builder
 	lastDash := false
 	for _, r := range s {

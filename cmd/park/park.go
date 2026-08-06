@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/urfave/cli/v3"
@@ -94,6 +95,19 @@ func runNoteForm(cfg *config.Config, cmd *cli.Command, form *note.NoteForm) erro
 		}
 	}
 	return nil
+}
+
+// formatInitMessage formats the result of store.Init for user-facing output.
+func formatInitMessage(created, existed []string) string {
+	if len(created) == 0 {
+		return "all park folders already exist"
+	}
+
+	msg := fmt.Sprintf("created park folders: %s", strings.Join(created, ", "))
+	if len(existed) > 0 {
+		msg += fmt.Sprintf(" (%s already existed)", strings.Join(existed, ", "))
+	}
+	return msg
 }
 
 func assistPark(cfg *config.Config) error {

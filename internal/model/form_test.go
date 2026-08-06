@@ -45,7 +45,7 @@ func TestNewNoteFormModelUnknownCategory(t *testing.T) {
 func TestNoteFormModelSubmission(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
-	if _, err := store.Init(cfg); err != nil {
+	if _, _, err := store.Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestNoteFormModelSubmission(t *testing.T) {
 func TestNoteFormModelRequiresSource(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
-	if _, err := store.Init(cfg); err != nil {
+	if _, _, err := store.Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 

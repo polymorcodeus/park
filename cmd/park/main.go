@@ -92,9 +92,9 @@ func Main() {
 			},
 			{
 				Name:  "config",
-				Usage: "print the default configuration file",
+				Usage: "print the loaded configuration",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					out, err := config.DumpDefault(parkRoot)
+					out, err := config.DumpConfig(cfg)
 					if err != nil {
 						return styledExit(err, 1)
 					}
@@ -103,13 +103,33 @@ func Main() {
 				},
 			},
 			{
-				Name:  "init",
-				Usage: "create the category folders",
+				Name:  "check",
+				Usage: "verify that category folders exist (useful for automation)",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					msg, err := store.Init(cfg)
+					missing, err := store.Check(cfg)
 					if err != nil {
 						return styledExit(err, 1)
 					}
+					if len(missing) > 0 {
+						for _, p := range missing {
+							if _, err := fmt.Fprintf(cmd.Root().Writer, "missing: %s\n", p); err != nil {
+								return err
+							}
+						}
+						return styledExit(fmt.Errorf("%d category folder(s) missing", len(missing)), 1)
+					}
+					return nil
+				},
+			},
+			{
+				Name:  "init",
+				Usage: "create the category folders (idempotent)",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					created, existed, err := store.Init(cfg)
+					if err != nil {
+						return styledExit(err, 1)
+					}
+					msg := formatInitMessage(created, existed)
 					if _, err := fmt.Fprintln(cmd.Root().Writer, msg); err != nil {
 						return err
 					}

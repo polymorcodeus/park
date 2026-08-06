@@ -22,17 +22,46 @@ type Item struct {
 	ModTime     time.Time
 }
 
-// Init creates the category folders defined in cfg and returns a summary
-// message for the caller to display.
-func Init(cfg *config.Config) (string, error) {
+// Init creates the category folders defined in cfg. It returns the paths
+// that were created and the paths that already existed. It is safe to run
+// repeatedly: folders that already exist are left untouched.
+func Init(cfg *config.Config) (created []string, existed []string, err error) {
 	for _, cl := range cfg.Categories {
-		if err := os.MkdirAll(cl.Path, 0o755); err != nil {
-			return "", fmt.Errorf("create category folder %q: %w", cl.Path, err)
+		info, statErr := os.Stat(cl.Path)
+		if statErr == nil && info.IsDir() {
+			existed = append(existed, cl.Path)
+			continue
 		}
+		if statErr != nil && !os.IsNotExist(statErr) {
+			return nil, nil, fmt.Errorf("stat category folder %q: %w", cl.Path, statErr)
+		}
+		if mkdirErr := os.MkdirAll(cl.Path, 0o755); mkdirErr != nil {
+			return nil, nil, fmt.Errorf("create category folder %q: %w", cl.Path, mkdirErr)
+		}
+		created = append(created, cl.Path)
 	}
+	return created, existed, nil
+}
 
-	msg := fmt.Sprintf("initialized park folders (%s) under configured paths", strings.Join(cfg.CategoryNames(), "/"))
-	return msg, nil
+// Check returns the list of category paths that do not exist as directories.
+// It returns an error if a path cannot be inspected for reasons other than
+// not existing, or if the path exists but is not a directory.
+func Check(cfg *config.Config) ([]string, error) {
+	var missing []string
+	for _, cl := range cfg.Categories {
+		info, err := os.Stat(cl.Path)
+		if err == nil {
+			if !info.IsDir() {
+				return nil, fmt.Errorf("category path %q exists but is not a directory", cl.Path)
+			}
+			continue
+		}
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("stat category folder %q: %w", cl.Path, err)
+		}
+		missing = append(missing, cl.Path)
+	}
+	return missing, nil
 }
 
 // Scan lists all markdown files under a given category folder, sorted oldest

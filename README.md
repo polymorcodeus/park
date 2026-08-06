@@ -47,6 +47,12 @@ Requires Go 1.26.4+.
 park init     # creates _inbox/, _projects/, _areas/, _archive/
 ```
 
+`park init` is idempotent: running it again reports which folders already exist and only creates missing ones. To verify initialization without changing anything -- useful in setup scripts and CI -- use `park check`:
+
+```bash
+park check    # exits 0 when all category folders exist, 1 otherwise
+```
+
 The default root is the OS user config directory (`~/.config/park` on Linux, `~/Library/Application Support/park` on macOS). Scope notes to a specific location by setting `PARK_ROOT`:
 
 ```bash
@@ -96,7 +102,8 @@ Frontmatter is parsed line-by-line — no YAML dependency. Four fields:
 
 | command | purpose |
 |---------|---------|
-| `init` | create the category folders |
+| `init` | create the category folders (idempotent) |
+| `check` | verify category folders exist (useful for automation) |
 | `new [title]` | park a new note (alias `add`) |
 | `assist` | open the tabbed TUI browser |
 | `show <file>` | glamour-render a note, no TUI |
@@ -189,6 +196,16 @@ park new -f /tmp/claude-output.md \
 ```
 
 The file is read, frontmatter is injected, and it is moved into the category folder. The original file stays in place.
+
+### Verify setup from an agent
+
+Before running other commands, an agent can ensure the park storage is initialized without side effects:
+
+```bash
+park check || park init
+```
+
+`park check` exits 0 when all configured category folders exist and exits 1 (printing the missing paths) when they do not. This makes it safe to call idempotently in setup scripts and agent tool loops.
 
 ### Reclassify from an agent
 

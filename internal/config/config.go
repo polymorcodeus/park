@@ -141,6 +141,16 @@ func DumpDefault(root string) (string, error) {
 	return b.String(), nil
 }
 
+// DumpConfig returns the loaded config as a TOML string.
+func DumpConfig(cfg *Config) (string, error) {
+	var b strings.Builder
+	enc := toml.NewEncoder(&b)
+	if err := enc.Encode(cfg); err != nil {
+		return "", fmt.Errorf("encode config: %w", err)
+	}
+	return b.String(), nil
+}
+
 // DefaultConfigPath returns the default path to the park configuration file.
 func DefaultConfigPath() string {
 	return filepath.Join(DefaultRootPath(), "config")

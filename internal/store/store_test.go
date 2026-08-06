@@ -13,7 +13,7 @@ func TestInitCreatesFolders(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
 
-	if _, err := Init(cfg); err != nil {
+	if _, _, err := Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -24,10 +24,81 @@ func TestInitCreatesFolders(t *testing.T) {
 	}
 }
 
+func TestInitIdempotent(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+
+	createdFirst, _, err := Init(cfg)
+	if err != nil {
+		t.Fatalf("Init() first error = %v", err)
+	}
+	if len(createdFirst) != len(cfg.Categories) {
+		t.Fatalf("Init() first created = %d, want %d", len(createdFirst), len(cfg.Categories))
+	}
+
+	createdSecond, existedSecond, err := Init(cfg)
+	if err != nil {
+		t.Fatalf("Init() second error = %v", err)
+	}
+	if len(createdSecond) != 0 {
+		t.Fatalf("Init() second created = %d, want 0", len(createdSecond))
+	}
+	if len(existedSecond) != len(cfg.Categories) {
+		t.Fatalf("Init() second existed = %d, want %d", len(existedSecond), len(cfg.Categories))
+	}
+}
+
+func TestCheckAllExist(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+	if _, _, err := Init(cfg); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	missing, err := Check(cfg)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if len(missing) > 0 {
+		t.Fatalf("Check() = %v, want none", missing)
+	}
+}
+
+func TestCheckMissing(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+
+	// Only create one folder
+	_ = os.MkdirAll(cfg.Categories[0].Path, 0o755)
+
+	missing, err := Check(cfg)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if len(missing) != 3 {
+		t.Fatalf("Check() = %d missing, want 3", len(missing))
+	}
+}
+
+func TestCheckPathIsFile(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+
+	// Create a file where a category folder is expected.
+	if err := os.WriteFile(cfg.Categories[0].Path, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := Check(cfg)
+	if err == nil {
+		t.Fatal("Check() expected error when category path is a file")
+	}
+}
+
 func TestNewCreatesNote(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
-	if _, err := Init(cfg); err != nil {
+	if _, _, err := Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -58,7 +129,7 @@ func TestNewCreatesNote(t *testing.T) {
 func TestReclassifyMovesFile(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
-	if _, err := Init(cfg); err != nil {
+	if _, _, err := Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -94,7 +165,7 @@ func TestReclassifyMovesFile(t *testing.T) {
 func TestReclassifySameCategory(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
-	if _, err := Init(cfg); err != nil {
+	if _, _, err := Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -127,7 +198,7 @@ func TestReclassifyUnknownCategory(t *testing.T) {
 func TestReclassifyMissingFile(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
-	if _, err := Init(cfg); err != nil {
+	if _, _, err := Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -140,7 +211,7 @@ func TestReclassifyMissingFile(t *testing.T) {
 func TestScan(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
-	if _, err := Init(cfg); err != nil {
+	if _, _, err := Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
@@ -173,7 +244,7 @@ func TestScanUnknownCategory(t *testing.T) {
 func TestResolvePath(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
-	if _, err := Init(cfg); err != nil {
+	if _, _, err := Init(cfg); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 

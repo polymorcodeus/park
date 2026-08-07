@@ -246,15 +246,6 @@ default_category = "inbox"
 
 Categories are fully configurable: name, storage path, and TUI hotkey. Add or remove categories to match your workflow. `default_category` is where `park new` lands notes when `-c` is omitted.
 
-## Design
-
-Core decisions that shape the project:
-
-- **Composable architecture.** The six `internal/*` packages (`config`, `note`, `store`, `render`, `model`, `theme`, `fs`) are self-contained with minimal coupling. Importing `internal/model` into another CLI is just wiring commands to exported functions — `cmd/park` exists solely as a reference consumer.
-- **No YAML dependency for frontmatter.** Parsed line-by-line as flat `key: value` pairs. One less dependency, zero ambiguity about which YAML dialect.
-- **Atomic reclassification.** Frontmatter is rewritten before the file is moved. A failed rename doesn't corrupt state.
-- **Synopsis-first triage.** The frontmatter `synopsis` field is the entire inbox UX. No metadata-surfing required.
-
 ## Tech stack
 
 | component | library |

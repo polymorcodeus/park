@@ -1,7 +1,10 @@
 package model
 
 import (
+	"strings"
+
 	"charm.land/lipgloss/v2"
+	"github.com/polymorcodeus/park/internal/config"
 	"github.com/polymorcodeus/park/internal/theme"
 )
 
@@ -33,6 +36,12 @@ type styles struct {
 	listDimmedDesc    lipgloss.Style
 }
 
+// fg builds a style with only a foreground color set. Most of the theme's
+// styles are just this, so this collapses them from four lines to one.
+func fg(color string) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+}
+
 func newStyles() *styles {
 	inactiveTabBorder := tabBorderWithBottom("┴", "─", "┴")
 	activeTabBorder := tabBorderWithBottom("┘", " ", "└")
@@ -54,43 +63,58 @@ func newStyles() *styles {
 	s.topBorder = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, true, false).
 		BorderForeground(lipgloss.Color(theme.CharmPink))
-	s.highlight = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmPink))
+	s.highlight = fg(theme.CharmPink)
 	s.window = lipgloss.NewStyle().
 		BorderBottom(true).
 		Padding(1, 2).
 		Align(lipgloss.Center).
 		UnsetBorderTop()
-	s.errorText = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmRed))
-	s.helpText = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmTextFaint))
-	s.submitButton = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmTextFaint))
+	s.errorText = fg(theme.CharmRed)
+	s.helpText = fg(theme.CharmTextFaint)
+	s.submitButton = fg(theme.CharmTextFaint)
 	s.submitButtonFocus = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(theme.CharmBG)).
 		Background(lipgloss.Color(theme.CharmPink))
-	s.focusedPrompt = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmPink))
-	s.focusedText = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmText))
-	s.blurredPrompt = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmTextFaint))
-	s.blurredText = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmText))
-	s.listNormalTitle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmText))
-	s.listNormalDesc = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmTextFaint))
-	s.listSelectedTitle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmPurpleLt))
-	s.listSelectedDesc = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmTextMute))
-	s.listDimmedTitle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmTextFaint))
-	s.listDimmedDesc = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(theme.CharmTextFaint))
+	s.focusedPrompt = fg(theme.CharmPink)
+	s.focusedText = fg(theme.CharmText)
+	s.blurredPrompt = fg(theme.CharmTextFaint)
+	s.blurredText = fg(theme.CharmText)
+	s.listNormalTitle = fg(theme.CharmText)
+	s.listNormalDesc = fg(theme.CharmTextFaint)
+	s.listSelectedTitle = fg(theme.CharmPurpleLt)
+	s.listSelectedDesc = fg(theme.CharmTextMute)
+	s.listDimmedTitle = fg(theme.CharmTextFaint)
+	s.listDimmedDesc = fg(theme.CharmTextFaint)
 	return s
+}
+
+// renderTabs renders a row of category tabs padded out to width with the
+// top-border gap style, highlighting the tab at activeIdx. When focused is
+// true, the active tab additionally gets a "❯ name ❮" indicator, used by
+// the note form to show that the category selector itself has focus.
+func (s *styles) renderTabs(categories []config.Category, activeIdx, width int, focused bool) string {
+	var rendered []string
+	for i, cl := range categories {
+		style := s.inactiveTab
+		label := cl.Name
+		if i == activeIdx {
+			style = s.activeTab
+			if focused {
+				label = "❯ " + cl.Name + " ❮"
+			}
+		}
+		rendered = append(rendered, style.Render(label))
+	}
+	row := lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+	gapWidth := max(0, width-lipgloss.Width(row))
+	gap := s.topBorder.Render(strings.Repeat(" ", gapWidth))
+	return lipgloss.JoinHorizontal(lipgloss.Bottom, row, gap)
+}
+
+// cycleIndex advances idx by delta and wraps around within [0, n). Used to
+// cycle category selection in both the assist list and the note form.
+func cycleIndex(idx, delta, n int) int {
+	return ((idx+delta)%n + n) % n
 }
 
 func tabBorderWithBottom(left, middle, right string) lipgloss.Border {

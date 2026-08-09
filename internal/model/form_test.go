@@ -10,6 +10,15 @@ import (
 	"github.com/polymorcodeus/park/internal/store"
 )
 
+func fieldIndex(m NoteFormModel, f formField) int {
+	for i, ff := range m.fields {
+		if ff == f {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestNewNoteFormModel(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	seed := note.Draft{
@@ -77,9 +86,12 @@ func TestNoteFormModelSubmission(t *testing.T) {
 	}
 
 	msg := cmd()
-	created, ok := msg.(formCreatedMsg)
+	created, ok := msg.(createResult)
 	if !ok {
-		t.Fatalf("expected formCreatedMsg, got %T", msg)
+		t.Fatalf("expected createResult, got %T", msg)
+	}
+	if created.err != nil {
+		t.Fatalf("unexpected create error: %v", created.err)
 	}
 	if created.path == "" {
 		t.Fatal("expected non-empty path")
@@ -112,14 +124,14 @@ func TestNoteFormModelRequiresSource(t *testing.T) {
 	}
 
 	msg := cmd()
-	errMsg, ok := msg.(formErrorMsg)
+	res, ok := msg.(createResult)
 	if !ok {
-		t.Fatalf("expected formErrorMsg, got %T", msg)
+		t.Fatalf("expected createResult, got %T", msg)
 	}
-	if errMsg.err == nil {
+	if res.err == nil {
 		t.Fatal("expected error for missing source")
 	}
-	final.err = errMsg.err
+	final.err = res.err
 	if final.err == nil {
 		t.Fatal("expected error for missing source")
 	}
@@ -142,7 +154,7 @@ func TestNoteFormModelCategoryNavigation(t *testing.T) {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
 
-	m.focusIndex = m.categoryIndex()
+	m.focusIndex = fieldIndex(m, fieldCategory)
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	final, ok := updated.(NoteFormModel)
 	if !ok {
@@ -161,7 +173,7 @@ func TestNoteFormModelBodyCursorStartsAtTop(t *testing.T) {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
 
-	m.focusIndex = m.bodyIndex()
+	m.focusIndex = fieldIndex(m, fieldBody)
 	m, _ = m.updateFocus()
 
 	if m.bodyInput.ScrollYOffset() != 0 {

@@ -14,72 +14,155 @@ import (
 	"github.com/polymorcodeus/park/internal/fs"
 )
 
-// Frontmatter is the fixed schema for every parked note. Deliberately flat
-// (no nesting) so it can be parsed line-by-line without a YAML dependency.
-type Frontmatter struct {
+// Metadata is the set of fields persisted as frontmatter in every note.
+type Metadata struct {
 	Category string
 	Created  string
 	Source   string
 	Synopsis string
 }
 
-// MissingFields returns the required frontmatter fields that are empty.
-func (fm Frontmatter) MissingFields() []string {
+// IsComplete reports whether all metadata fields are populated.
+func (m Metadata) IsComplete() bool {
+	return fieldSet(m.Category) && fieldSet(m.Created) && fieldSet(m.Source) && fieldSet(m.Synopsis)
+}
+
+// MissingFields returns the metadata fields that are empty.
+func (m Metadata) MissingFields() []string {
 	var missing []string
-	if strings.TrimSpace(fm.Category) == "" {
+	if !fieldSet(m.Category) {
 		missing = append(missing, "category")
 	}
-	if strings.TrimSpace(fm.Created) == "" {
+	if !fieldSet(m.Created) {
 		missing = append(missing, "created")
 	}
-	if strings.TrimSpace(fm.Source) == "" {
+	if !fieldSet(m.Source) {
 		missing = append(missing, "source")
 	}
-	if strings.TrimSpace(fm.Synopsis) == "" {
+	if !fieldSet(m.Synopsis) {
 		missing = append(missing, "synopsis")
 	}
 	return missing
 }
 
-// ParseFrontmatter reads the leading `---` delimited block from a markdown
-// file and returns the parsed fields plus the raw body that follows.
-func ParseFrontmatter(path string) (Frontmatter, string, error) {
+// Note is the persisted representation of a parked note. Path is empty when
+// the note is parsed from a string rather than read from a file.
+type Note struct {
+	Body string
+	Path string
+	Metadata
+}
+
+// HasCompleteMetadata reports whether all frontmatter fields are present.
+func (n Note) HasCompleteMetadata() bool {
+	return n.IsComplete()
+}
+
+// Draft is the creation-time representation of a note. Created may be empty
+// and is populated when the draft is converted to a Note.
+type Draft struct {
+	Filename string
+	Body     string
+	FromFile string
+	Metadata
+}
+
+// WithDefaults fills in the default category and derives the filename from
+// the source file when either is empty.
+func (d Draft) WithDefaults(cfg *config.Config) Draft {
+	if d.Category == "" {
+		d.Category = cfg.DefaultCategory
+	}
+	if d.Filename == "" && d.FromFile != "" {
+		d.Filename = filepath.Base(d.FromFile)
+	}
+	return d
+}
+
+// ReadyToCreate reports whether the draft has all fields required to create a
+// note. Created is intentionally not checked; it is populated on write.
+func (d Draft) ReadyToCreate() bool {
+	return fieldSet(d.Filename) && fieldSet(d.Category) && fieldSet(d.Source) && fieldSet(d.Synopsis) && d.Slug() != ""
+}
+
+// MissingFields returns the user-supplied fields still required to create a note.
+func (d Draft) MissingFields() []string {
+	var missing []string
+	if !fieldSet(d.Filename) || !fieldSet(d.Slug()) {
+		missing = append(missing, "filename")
+	}
+	if !fieldSet(d.Category) {
+		missing = append(missing, "category")
+	}
+	if !fieldSet(d.Source) {
+		missing = append(missing, "source")
+	}
+	if !fieldSet(d.Synopsis) {
+		missing = append(missing, "synopsis")
+	}
+	return missing
+}
+
+// Slug returns a URL-safe slug derived from the draft filename.
+func (d Draft) Slug() string {
+	return slugify(d.Filename)
+}
+
+// H1 scans the body for a single-line H1 heading and returns the heading text.
+func (d Draft) H1() (string, bool) {
+	for line := range strings.SplitSeq(d.Body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if after, ok := strings.CutPrefix(trimmed, "# "); ok {
+			return strings.TrimSpace(after), true
+		}
+		break
+	}
+	return "", false
+}
+
+// Parse reads the leading `---` delimited block from a markdown file and
+// returns the parsed note. The note's Path is set to the file path.
+// Unknown frontmatter keys are ignored.
+func Parse(path string) (Note, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Frontmatter{}, "", fmt.Errorf("open %q: %w", path, err)
+		return Note{}, fmt.Errorf("open %q: %w", path, err)
 	}
 	defer func() {
 		_ = f.Close()
 	}()
 
-	fm, body, _, err := parseFrontmatter(newScanner(f))
+	n, _, err := parse(newScanner(f))
 	if err != nil {
-		return fm, "", fmt.Errorf("parse %q: %w", path, err)
+		return n, fmt.Errorf("parse %q: %w", path, err)
 	}
-	return fm, body, nil
+	n.Path = path
+	return n, nil
 }
 
-// ParseFrontmatterString parses the leading `---` delimited block from a
-// markdown string and returns the parsed fields, the raw body that follows,
-// and a flag indicating whether a frontmatter block was found.
-func ParseFrontmatterString(content string) (Frontmatter, string, bool) {
-	fm, body, found, _ := parseFrontmatter(newStringScanner(content))
-	return fm, body, found
+// ParseString parses the leading `---` delimited block from a markdown string
+// and returns the parsed note plus a flag indicating whether a frontmatter
+// block was found. Unknown frontmatter keys are ignored.
+func ParseString(content string) (Note, bool) {
+	n, found, _ := parse(newStringScanner(content))
+	return n, found
 }
 
 func newScanner(f *os.File) *bufio.Scanner { return bufio.NewScanner(f) }
 
 func newStringScanner(s string) *bufio.Scanner { return bufio.NewScanner(strings.NewReader(s)) }
 
-func parseFrontmatter(scanner *bufio.Scanner) (Frontmatter, string, bool, error) {
-	fm := Frontmatter{}
+func parse(scanner *bufio.Scanner) (Note, bool, error) {
+	n := Note{}
 
-	// Frontmatter must start on the very first line of the file.
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			return fm, "", false, err
+			return n, false, err
 		}
-		return fm, "", false, nil
+		return n, false, nil
 	}
 	firstLine := scanner.Text()
 	if strings.TrimSpace(firstLine) != "---" {
@@ -88,10 +171,10 @@ func parseFrontmatter(scanner *bufio.Scanner) (Frontmatter, string, bool, error)
 			bodyLines = append(bodyLines, scanner.Text())
 		}
 		if err := scanner.Err(); err != nil {
-			return fm, "", false, err
+			return n, false, err
 		}
-		body := strings.TrimLeft(strings.Join(bodyLines, "\n"), "\n")
-		return fm, body, false, nil
+		n.Body = strings.TrimLeft(strings.Join(bodyLines, "\n"), "\n")
+		return n, false, nil
 	}
 
 	var bodyLines []string
@@ -109,22 +192,23 @@ func parseFrontmatter(scanner *bufio.Scanner) (Frontmatter, string, bool, error)
 			}
 			switch key {
 			case "category":
-				fm.Category = val
+				n.Category = val
 			case "created":
-				fm.Created = val
+				n.Created = val
 			case "source":
-				fm.Source = val
+				n.Source = val
 			case "synopsis":
-				fm.Synopsis = val
+				n.Synopsis = val
 			}
 			continue
 		}
 		bodyLines = append(bodyLines, line)
 	}
 	if err := scanner.Err(); err != nil {
-		return fm, "", false, err
+		return n, false, err
 	}
-	return fm, strings.TrimLeft(strings.Join(bodyLines, "\n"), "\n"), true, nil
+	n.Body = strings.TrimLeft(strings.Join(bodyLines, "\n"), "\n")
+	return n, true, nil
 }
 
 func splitKV(line string) (key, val string, ok bool) {
@@ -137,10 +221,10 @@ func splitKV(line string) (key, val string, ok bool) {
 	return key, val, key != ""
 }
 
-// WriteFrontmatter writes (or overwrites) a markdown file with the given
-// frontmatter and body. Writes to a temp file and renames into place so a
-// crash mid-write never leaves a partially-written note.
-func WriteFrontmatter(path string, fm Frontmatter, body string) (err error) {
+// Write writes (or overwrites) a markdown file with the note's frontmatter
+// and body. It writes to a temp file and renames into place so a crash
+// mid-write never leaves a partially-written note.
+func Write(path string, n Note) (err error) {
 	tmpPath := path + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
@@ -156,7 +240,7 @@ func WriteFrontmatter(path string, fm Frontmatter, body string) (err error) {
 	}()
 
 	if _, err = fmt.Fprintf(f, "---\ncategory: %s\ncreated: %s\nsource: %s\nsynopsis: %s\n---\n\n%s\n",
-		fm.Category, fm.Created, fm.Source, fm.Synopsis, body); err != nil {
+		n.Category, n.Created, n.Source, n.Synopsis, n.Body); err != nil {
 		return fmt.Errorf("write temp %q: %w", tmpPath, err)
 	}
 
@@ -171,89 +255,143 @@ func Today() string {
 	return time.Now().Format("2006-01-02")
 }
 
-// NewWithBody creates a fresh parked note with an explicit body. The filename
-// is slugified to form the note's filename.
-func NewWithBody(cfg *config.Config, filename, synopsis, source, targetCategory, body string) (string, error) {
-	cl, ok := cfg.CategoryByName(targetCategory)
-	if !ok {
-		return "", fmt.Errorf("unknown category %q — valid: %s", targetCategory, strings.Join(cfg.CategoryNames(), ", "))
-	}
-
-	slug := slugify(filename)
-	if slug == "" {
-		slug = "note-" + Today()
-	}
-	path := filepath.Join(cl.Path, slug+".md")
-
-	if _, err := os.Stat(cl.Path); os.IsNotExist(err) {
-		return "", fmt.Errorf("category folder %q does not exist; run `park init` to create it", cl.Path)
-	}
-
-	fm := Frontmatter{
-		Category: targetCategory,
-		Created:  Today(),
-		Source:   source,
-		Synopsis: synopsis,
-	}
-
-	if err := WriteFrontmatter(path, fm, body); err != nil {
-		return "", fmt.Errorf("write note %q: %w", path, err)
-	}
-	return path, nil
+// Result is the outcome of attempting to add a note headlessly.
+// Exactly one of Path or Form is set.
+type Result struct {
+	Path string
+	Form *Draft
 }
 
-// IngestFile moves an existing markdown file into the park, rewriting its
-// frontmatter. If body is empty, the original file content is preserved;
-// otherwise the supplied body is used. The source file is removed after a
-// successful write.
-func IngestFile(cfg *config.Config, srcPath, filename, synopsis, source, targetCategory, body string) (string, error) {
-	cl, ok := cfg.CategoryByName(targetCategory)
-	if !ok {
-		return "", fmt.Errorf("unknown category %q — valid: %s", targetCategory, strings.Join(cfg.CategoryNames(), ", "))
+// IngestFile reads the source file into the draft body when FromFile is set
+// and Body is empty, merging any file frontmatter metadata with the draft's
+// existing metadata (draft values take precedence).
+func IngestFile(d Draft) (Draft, error) {
+	if d.FromFile == "" || d.Body != "" {
+		return d, nil
 	}
-
-	srcPath = fs.ExpandPath(srcPath)
-
-	info, err := os.Stat(srcPath)
+	parsed, err := Parse(d.FromFile)
 	if err != nil {
-		return "", fmt.Errorf("stat source file %q: %w", srcPath, err)
+		return Draft{}, fmt.Errorf("parse source file %q: %w", d.FromFile, err)
 	}
-	if info.IsDir() {
-		return "", fmt.Errorf("source path %q is a directory", srcPath)
+	if d.Category == "" {
+		d.Category = parsed.Category
+	}
+	if d.Source == "" {
+		d.Source = parsed.Source
+	}
+	if d.Synopsis == "" {
+		d.Synopsis = parsed.Synopsis
+	}
+	d.Body = parsed.Body
+	return d, nil
+}
+
+// Add decides whether a note can be created headlessly or needs the
+// interactive form. It parses the source file and body frontmatter when
+// present, merging metadata with CLI values taking precedence, then applies
+// config defaults for anything still empty.
+func Add(cfg *config.Config, d Draft) (Result, error) {
+	if d.FromFile != "" && d.Body != "" {
+		return Result{}, fmt.Errorf("cannot specify both --from-file and a body")
 	}
 
-	if body == "" {
-		bodyBytes, err := os.ReadFile(srcPath)
+	if d.FromFile != "" {
+		var err error
+		d, err = IngestFile(d)
 		if err != nil {
-			return "", fmt.Errorf("read source file %q: %w", srcPath, err)
+			return Result{}, err
 		}
-		body = string(bodyBytes)
+	} else if d.Body != "" {
+		if parsed, hasFM := ParseString(d.Body); hasFM {
+			if missing := parsed.MissingFields(); len(missing) > 0 {
+				return Result{}, fmt.Errorf("incomplete frontmatter: missing %s", strings.Join(missing, ", "))
+			}
+			if d.Category == "" {
+				d.Category = parsed.Category
+			}
+			if d.Source == "" {
+				d.Source = parsed.Source
+			}
+			if d.Synopsis == "" {
+				d.Synopsis = parsed.Synopsis
+			}
+			d.Body = parsed.Body
+		}
 	}
 
-	slug := slugify(filename)
-	if slug == "" {
-		slug = "note-" + Today()
+	d = d.WithDefaults(cfg)
+
+	if d.ReadyToCreate() {
+		path, err := Create(cfg, d)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{Path: path}, nil
 	}
-	dstPath := filepath.Join(cl.Path, slug+".md")
+
+	if d.Body != "" || d.FromFile != "" {
+		if d.Filename == "" {
+			title, ok := d.H1()
+			if !ok {
+				return Result{}, fmt.Errorf("missing filename, retry with --filename")
+			}
+			d.Filename = title
+			if d.ReadyToCreate() {
+				path, err := Create(cfg, d)
+				if err != nil {
+					return Result{}, err
+				}
+				return Result{Path: path}, nil
+			}
+		}
+	}
+
+	return Result{Form: &d}, nil
+}
+
+// Create writes a note from a complete draft. Callers (Add and the form) are
+// responsible for ensuring required fields are present; this function resolves
+// the category path, writes the note, and removes the source file if FromFile
+// is set.
+func Create(cfg *config.Config, d Draft) (string, error) {
+	d = d.WithDefaults(cfg)
+
+	cl, ok := cfg.CategoryByName(d.Category)
+	if !ok {
+		return "", fmt.Errorf("unknown category %q — valid: %s", d.Category, strings.Join(cfg.CategoryNames(), ", "))
+	}
+
+	path := filepath.Join(cl.Path, d.Slug()+".md")
 
 	if _, err := os.Stat(cl.Path); os.IsNotExist(err) {
 		return "", fmt.Errorf("category folder %q does not exist; run `park init` to create it", cl.Path)
 	}
 
-	fm := Frontmatter{
-		Category: targetCategory,
-		Created:  Today(),
-		Source:   source,
-		Synopsis: synopsis,
+	n := Note{
+		Path: path,
+		Body: d.Body,
+		Metadata: Metadata{
+			Category: d.Category,
+			Created:  Today(),
+			Source:   d.Source,
+			Synopsis: d.Synopsis,
+		},
 	}
 
-	if err := WriteFrontmatter(dstPath, fm, body); err != nil {
-		return "", fmt.Errorf("write ingested note %q: %w", dstPath, err)
+	if err := Write(path, n); err != nil {
+		return "", fmt.Errorf("write note %q: %w", path, err)
 	}
-	if err := os.Remove(srcPath); err != nil {
-		return "", fmt.Errorf("remove source file %q: %w", srcPath, err)
+
+	if d.FromFile != "" {
+		srcPath, err := fs.ExpandPath(d.FromFile)
+		if err != nil {
+			return "", fmt.Errorf("expand source path %q: %w", d.FromFile, err)
+		}
+		if err := os.Remove(srcPath); err != nil {
+			return "", fmt.Errorf("remove source file %q: %w", srcPath, err)
+		}
 	}
-	return dstPath, nil
+	return path, nil
 }
 
 func slugify(s string) string {
@@ -274,171 +412,6 @@ func slugify(s string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
-}
-
-// extractHeading scans a markdown body for a single-line H1 heading, skipping
-// any leading frontmatter block. If found, it returns the heading text and
-// the body with both the frontmatter and the heading removed so the title is
-// not duplicated in the rendered note.
-func extractHeading(body string) (title, remaining string, ok bool) {
-	_, body, _ = ParseFrontmatterString(body)
-
-	lines := strings.Split(body, "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if after, ok := strings.CutPrefix(trimmed, "# "); ok {
-			title = strings.TrimSpace(after)
-			remainingLines := append(lines[:i], lines[i+1:]...)
-			remaining = strings.TrimLeft(strings.Join(remainingLines, "\n"), "\n")
-			return title, remaining, true
-		}
-		break
-	}
-	return "", body, false
-}
-
-// ExtractH1 scans a markdown body for a single-line H1 heading and returns
-// the heading text. It stops at the first non-empty line that is not an H1.
-func ExtractH1(body string) (string, bool) {
-	for line := range strings.SplitSeq(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if after, ok := strings.CutPrefix(trimmed, "# "); ok {
-			return strings.TrimSpace(after), true
-		}
-		break
-	}
-	return "", false
-}
-
-// NoteInput captures the raw inputs for creating a parked note.
-type NoteInput struct {
-	Filename string
-	Synopsis string
-	Source   string
-	Category string // explicit target category; empty means the config default
-	Body     string // raw content from stdin or a file read by the caller
-	FromFile string // path to the original file when ingesting
-}
-
-// NoteOutcome is the result of attempting to create a note headlessly.
-// Exactly one of Path or Form is set.
-type NoteOutcome struct {
-	Path string
-	Form *NoteForm
-}
-
-// NoteForm holds the starting values for the interactive note form.
-type NoteForm struct {
-	Filename string
-	Synopsis string
-	Source   string
-	Category string
-	Body     string
-	FromFile string
-}
-
-// AddNote attempts to create a note without user interaction. If required
-// metadata is missing, it returns a NoteOutcome with Form populated and no
-// error.
-func AddNote(cfg *config.Config, in NoteInput) (NoteOutcome, error) {
-	target := cfg.DefaultCategory
-	if in.Category != "" {
-		target = in.Category
-	}
-
-	hasInput := in.Body != "" || in.FromFile != ""
-	hasMetadata := fieldSet(in.Filename) && fieldSet(in.Synopsis) && fieldSet(in.Source)
-
-	if hasInput && hasMetadata {
-		// Caller supplied all required metadata and a body; create the note
-		// directly. Strip any frontmatter in the body so it isn't duplicated
-		// by WriteFrontmatter; if there is no frontmatter, keep the body as-is.
-		body := in.Body
-		if _, parsed, hasFM := ParseFrontmatterString(in.Body); hasFM {
-			body = parsed
-		}
-		var path string
-		var err error
-		if in.FromFile != "" {
-			path, err = IngestFile(cfg, in.FromFile, in.Filename, in.Synopsis, in.Source, target, body)
-		} else {
-			path, err = NewWithBody(cfg, in.Filename, in.Synopsis, in.Source, target, body)
-		}
-		if err != nil {
-			return NoteOutcome{}, err
-		}
-		return NoteOutcome{Path: path}, nil
-	}
-
-	if hasInput {
-		return addFromInput(cfg, in, target)
-	}
-
-	if hasMetadata {
-		path, err := NewWithBody(cfg, in.Filename, in.Synopsis, in.Source, target, "")
-		if err != nil {
-			return NoteOutcome{}, err
-		}
-		return NoteOutcome{Path: path}, nil
-	}
-
-	return NoteOutcome{Form: &NoteForm{
-		Filename: in.Filename,
-		Synopsis: in.Synopsis,
-		Source:   in.Source,
-		Category: target,
-		FromFile: in.FromFile,
-	}}, nil
-}
-
-func addFromInput(cfg *config.Config, in NoteInput, target string) (NoteOutcome, error) {
-	fm, body, hasFM := ParseFrontmatterString(in.Body)
-	if !hasFM {
-		return NoteOutcome{Form: &NoteForm{
-			Filename: in.Filename,
-			Synopsis: in.Synopsis,
-			Source:   in.Source,
-			Category: target,
-			Body:     in.Body,
-			FromFile: in.FromFile,
-		}}, nil
-	}
-
-	if missing := fm.MissingFields(); len(missing) > 0 {
-		return NoteOutcome{}, fmt.Errorf("incomplete frontmatter: missing %s", strings.Join(missing, ", "))
-	}
-	cl, ok := cfg.CategoryByName(fm.Category)
-	if !ok {
-		return NoteOutcome{}, fmt.Errorf("unknown category %q in frontmatter — valid: %s", fm.Category, strings.Join(cfg.CategoryNames(), ", "))
-	}
-	target = cl.Name
-
-	filename := strings.TrimSpace(in.Filename)
-	if filename == "" {
-		h1, hasH1 := ExtractH1(body)
-		if !hasH1 {
-			return NoteOutcome{}, fmt.Errorf("missing filename, retry with --filename")
-		}
-		filename = h1
-	}
-
-	var path string
-	var err error
-	if in.FromFile != "" {
-		path, err = IngestFile(cfg, in.FromFile, filename, fm.Synopsis, fm.Source, target, body)
-	} else {
-		path, err = NewWithBody(cfg, filename, fm.Synopsis, fm.Source, target, body)
-	}
-	if err != nil {
-		return NoteOutcome{}, err
-	}
-	return NoteOutcome{Path: path}, nil
 }
 
 func fieldSet(s string) bool {

@@ -16,10 +16,10 @@ import (
 
 // Item is a single parked note as seen by the scanner/TUI.
 type Item struct {
-	Path        string
-	Filename    string
-	Frontmatter note.Frontmatter
-	ModTime     time.Time
+	note.Metadata
+	Path     string
+	Filename string
+	ModTime  time.Time
 }
 
 // Init creates the category folders defined in cfg. It returns the paths
@@ -86,7 +86,7 @@ func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 			continue
 		}
 		path := filepath.Join(cl.Path, e.Name())
-		fm, _, err := note.ParseFrontmatter(path)
+		n, err := note.Parse(path)
 		if err != nil {
 			return nil, fmt.Errorf("parse frontmatter for %q: %w", path, err)
 		}
@@ -95,10 +95,10 @@ func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 			return nil, fmt.Errorf("stat %q: %w", path, err)
 		}
 		items = append(items, Item{
-			Path:        path,
-			Filename:    e.Name(),
-			Frontmatter: fm,
-			ModTime:     info.ModTime(),
+			Metadata: n.Metadata,
+			Path:     path,
+			Filename: e.Name(),
+			ModTime:  info.ModTime(),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -117,14 +117,13 @@ func Reclassify(cfg *config.Config, filename string, targetCategory string) erro
 	}
 
 	var src string
-	var fm note.Frontmatter
-	var body string
+	var n note.Note
 	for _, c := range cfg.Categories {
 		candidate := filepath.Join(c.Path, filename)
 		if _, statErr := os.Stat(candidate); statErr == nil {
 			src = candidate
 			var parseErr error
-			fm, body, parseErr = note.ParseFrontmatter(candidate)
+			n, parseErr = note.Parse(candidate)
 			if parseErr != nil {
 				return fmt.Errorf("parse frontmatter for %q: %w", candidate, parseErr)
 			}
@@ -139,18 +138,31 @@ func Reclassify(cfg *config.Config, filename string, targetCategory string) erro
 		return fmt.Errorf("already in %s", targetCategory)
 	}
 
-	fm.Category = targetCategory
+	n.Category = targetCategory
 	dst := filepath.Join(cl.Path, filename)
 
 	// Rewrite frontmatter in place first, then move — if the move fails
 	// (e.g. cross-device), the file is still left in a consistent state.
-	if err := note.WriteFrontmatter(src, fm, body); err != nil {
+	if err := note.Write(src, n); err != nil {
 		return fmt.Errorf("rewrite frontmatter for %q: %w", src, err)
 	}
 	if err := os.Rename(src, dst); err != nil {
 		return fmt.Errorf("move %q to %q: %w", src, dst, err)
 	}
 	return nil
+}
+
+// FormatInitResult formats the result of Init for user-facing output.
+func FormatInitResult(created, existed []string) string {
+	if len(created) == 0 {
+		return "all park folders already exist"
+	}
+
+	msg := fmt.Sprintf("created park folders: %s", strings.Join(created, ", "))
+	if len(existed) > 0 {
+		msg += fmt.Sprintf(" (%s already existed)", strings.Join(existed, ", "))
+	}
+	return msg
 }
 
 // ResolvePath accepts either a bare filename (searched across all category

@@ -102,27 +102,27 @@ func TestNewCreatesNote(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	path, err := note.NewWithBody(cfg, "My Note", "a synopsis", "test", "inbox", "")
+	path, err := note.Create(cfg, note.Draft{Filename: "My Note", Metadata: note.Metadata{Synopsis: "a synopsis", Source: "test", Category: "inbox"}})
 	if err != nil {
-		t.Fatalf("NewWithBody() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("note file missing: %v", err)
 	}
 
-	fm, _, err := note.ParseFrontmatter(path)
+	n, err := note.Parse(path)
 	if err != nil {
-		t.Fatalf("ParseFrontmatter() error = %v", err)
+		t.Fatalf("Parse() error = %v", err)
 	}
-	if fm.Category != "inbox" {
-		t.Errorf("category = %q, want inbox", fm.Category)
+	if n.Category != "inbox" {
+		t.Errorf("category = %q, want inbox", n.Category)
 	}
-	if fm.Synopsis != "a synopsis" {
-		t.Errorf("synopsis = %q, want %q", fm.Synopsis, "a synopsis")
+	if n.Synopsis != "a synopsis" {
+		t.Errorf("synopsis = %q, want %q", n.Synopsis, "a synopsis")
 	}
-	if fm.Source != "test" {
-		t.Errorf("source = %q, want test", fm.Source)
+	if n.Source != "test" {
+		t.Errorf("source = %q, want test", n.Source)
 	}
 }
 
@@ -133,9 +133,9 @@ func TestReclassifyMovesFile(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	path, err := note.NewWithBody(cfg, "Move Me", "synopsis", "test", "inbox", "")
+	path, err := note.Create(cfg, note.Draft{Filename: "Move Me", Metadata: note.Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"}})
 	if err != nil {
-		t.Fatalf("NewWithBody() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	filename := filepath.Base(path)
 
@@ -153,12 +153,12 @@ func TestReclassifyMovesFile(t *testing.T) {
 		t.Errorf("file missing in projects: %v", err)
 	}
 
-	fm, _, err := note.ParseFrontmatter(projectsPath)
+	n, err := note.Parse(projectsPath)
 	if err != nil {
-		t.Fatalf("ParseFrontmatter() error = %v", err)
+		t.Fatalf("Parse() error = %v", err)
 	}
-	if fm.Category != "projects" {
-		t.Errorf("category = %q, want projects", fm.Category)
+	if n.Category != "projects" {
+		t.Errorf("category = %q, want projects", n.Category)
 	}
 }
 
@@ -169,9 +169,9 @@ func TestReclassifySameCategory(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	path, err := note.NewWithBody(cfg, "Stay Put", "synopsis", "test", "inbox", "")
+	path, err := note.Create(cfg, note.Draft{Filename: "Stay Put", Metadata: note.Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"}})
 	if err != nil {
-		t.Fatalf("NewWithBody() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	filename := filepath.Base(path)
 
@@ -215,11 +215,11 @@ func TestScan(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	if _, err := note.NewWithBody(cfg, "First", "oldest", "test", "inbox", ""); err != nil {
-		t.Fatalf("NewWithBody() error = %v", err)
+	if _, err := note.Create(cfg, note.Draft{Filename: "First", Metadata: note.Metadata{Synopsis: "oldest", Source: "test", Category: "inbox"}}); err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
-	if _, err := note.NewWithBody(cfg, "Second", "newer", "test", "inbox", ""); err != nil {
-		t.Fatalf("NewWithBody() error = %v", err)
+	if _, err := note.Create(cfg, note.Draft{Filename: "Second", Metadata: note.Metadata{Synopsis: "newer", Source: "test", Category: "inbox"}}); err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
 
 	items, err := Scan(cfg, "inbox")
@@ -248,9 +248,9 @@ func TestResolvePath(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	path, err := note.NewWithBody(cfg, "Resolve Me", "synopsis", "test", "inbox", "")
+	path, err := note.Create(cfg, note.Draft{Filename: "Resolve Me", Metadata: note.Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"}})
 	if err != nil {
-		t.Fatalf("NewWithBody() error = %v", err)
+		t.Fatalf("Create() error = %v", err)
 	}
 	filename := filepath.Base(path)
 

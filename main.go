@@ -19,14 +19,10 @@ var (
 	buildTime string
 )
 
-// use embedded VERSION file for local `go install`d version
-func init() {
+func main() {
 	if version == "" {
 		version = strings.TrimSpace(versionFile)
 	}
-}
-
-func main() {
 	cmd.SetVersion(version)
 	cmd.SetBuildTime(buildTime)
 	cmd.Main()

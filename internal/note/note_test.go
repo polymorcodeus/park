@@ -9,17 +9,17 @@ import (
 	"github.com/polymorcodeus/park/internal/config"
 )
 
-func TestParseFrontmatter(t *testing.T) {
+func TestParse(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  string
-		want     Frontmatter
+		want     Metadata
 		wantBody string
 	}{
 		{
 			name:    "all fields",
 			content: "---\ncategory: inbox\ncreated: 2026-07-28\nsource: terminal\nsynopsis: a test note\n---\n\n# hello\n",
-			want: Frontmatter{
+			want: Metadata{
 				Category: "inbox",
 				Created:  "2026-07-28",
 				Source:   "terminal",
@@ -30,7 +30,7 @@ func TestParseFrontmatter(t *testing.T) {
 		{
 			name:    "empty body",
 			content: "---\ncategory: archive\ncreated: 2026-07-28\nsource: chat\nsynopsis:\n---\n",
-			want: Frontmatter{
+			want: Metadata{
 				Category: "archive",
 				Created:  "2026-07-28",
 				Source:   "chat",
@@ -48,50 +48,56 @@ func TestParseFrontmatter(t *testing.T) {
 				t.Fatalf("write test file: %v", err)
 			}
 
-			got, body, err := ParseFrontmatter(path)
+			got, err := Parse(path)
 			if err != nil {
-				t.Fatalf("ParseFrontmatter() error = %v", err)
+				t.Fatalf("Parse() error = %v", err)
 			}
-			if got != tt.want {
-				t.Errorf("ParseFrontmatter() = %+v, want %+v", got, tt.want)
+			if got.Path != path {
+				t.Errorf("Parse() path = %q, want %q", got.Path, path)
 			}
-			if body != tt.wantBody {
-				t.Errorf("ParseFrontmatter() body = %q, want %q", body, tt.wantBody)
+			if got.Category != tt.want.Category || got.Created != tt.want.Created || got.Source != tt.want.Source || got.Synopsis != tt.want.Synopsis {
+				t.Errorf("Parse() = %+v, want %+v", got.Metadata, tt.want)
+			}
+			if got.Body != tt.wantBody {
+				t.Errorf("Parse() body = %q, want %q", got.Body, tt.wantBody)
 			}
 		})
 	}
 }
 
-func TestParseFrontmatterMissingFile(t *testing.T) {
-	_, _, err := ParseFrontmatter(filepath.Join(t.TempDir(), "nope.md"))
+func TestParseMissingFile(t *testing.T) {
+	_, err := Parse(filepath.Join(t.TempDir(), "nope.md"))
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
 }
 
-func TestWriteFrontmatterRoundTrip(t *testing.T) {
+func TestWriteRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "note.md")
-	fm := Frontmatter{
-		Category: "projects",
-		Created:  "2026-07-28",
-		Source:   "test",
-		Synopsis: "round trip",
+	n := Note{
+		Metadata: Metadata{
+			Category: "projects",
+			Created:  "2026-07-28",
+			Source:   "test",
+			Synopsis: "round trip",
+		},
+		Body: "# title\n",
 	}
 
-	if err := WriteFrontmatter(path, fm, "# title\n"); err != nil {
-		t.Fatalf("WriteFrontmatter() error = %v", err)
+	if err := Write(path, n); err != nil {
+		t.Fatalf("Write() error = %v", err)
 	}
 
-	got, body, err := ParseFrontmatter(path)
+	got, err := Parse(path)
 	if err != nil {
-		t.Fatalf("ParseFrontmatter() error = %v", err)
+		t.Fatalf("Parse() error = %v", err)
 	}
-	if got != fm {
-		t.Errorf("frontmatter mismatch: %+v, want %+v", got, fm)
+	if got.Metadata != n.Metadata {
+		t.Errorf("frontmatter mismatch: %+v, want %+v", got.Metadata, n.Metadata)
 	}
-	if body != "# title\n" {
-		t.Errorf("body = %q, want %q", body, "# title\n")
+	if got.Body != "# title\n" {
+		t.Errorf("body = %q, want %q", got.Body, "# title\n")
 	}
 }
 
@@ -102,42 +108,50 @@ func TestToday(t *testing.T) {
 	}
 }
 
-func TestNewWithBody(t *testing.T) {
+func TestCreate(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
 	if err := os.MkdirAll(cfg.Categories[0].Path, 0o755); err != nil {
 		t.Fatalf("create category folder: %v", err)
 	}
 
-	body := "## heading\n\nparagraph\n"
-	path, err := NewWithBody(cfg, "Body Note", "with body", "test", "inbox", body)
-	if err != nil {
-		t.Fatalf("NewWithBody() error = %v", err)
-	}
+	t.Run("creates note with body", func(t *testing.T) {
+		body := "## heading\n\nparagraph\n"
+		path, err := Create(cfg, Draft{
+			Filename: "Body Note",
+			Body:     body,
+			Metadata: Metadata{Synopsis: "with body", Source: "test", Category: "inbox"},
+		})
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
 
-	fm, parsedBody, err := ParseFrontmatter(path)
-	if err != nil {
-		t.Fatalf("ParseFrontmatter() error = %v", err)
-	}
-	if fm.Category != "inbox" {
-		t.Errorf("category = %q, want inbox", fm.Category)
-	}
-	if parsedBody != body {
-		t.Errorf("body = %q, want %q", parsedBody, body)
-	}
+		got, err := Parse(path)
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+		if got.Category != "inbox" {
+			t.Errorf("category = %q, want inbox", got.Category)
+		}
+		if got.Body != body {
+			t.Errorf("body = %q, want %q", got.Body, body)
+		}
+	})
+
+	t.Run("missing folder returns error", func(t *testing.T) {
+		cfgNoFolder := config.DefaultConfig(t.TempDir())
+		_, err := Create(cfgNoFolder, Draft{
+			Filename: "Note",
+			Metadata: Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"},
+		})
+		if err == nil {
+			t.Fatal("expected error when category folder does not exist")
+		}
+	})
+
 }
 
-func TestNewWithBodyMissingFolder(t *testing.T) {
-	tmp := t.TempDir()
-	cfg := config.DefaultConfig(tmp)
-
-	_, err := NewWithBody(cfg, "Note", "synopsis", "test", "inbox", "")
-	if err == nil {
-		t.Fatal("expected error when category folder does not exist")
-	}
-}
-
-func TestIngestFile(t *testing.T) {
+func TestCreateFromFile(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
 	if err := os.MkdirAll(cfg.Categories[1].Path, 0o755); err != nil {
@@ -150,159 +164,102 @@ func TestIngestFile(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	path, err := IngestFile(cfg, src, "Draft Note", "ingested", "agent", "projects", "")
+	d, err := IngestFile(Draft{
+		Filename: "Draft Note",
+		FromFile: src,
+		Metadata: Metadata{Synopsis: "ingested", Source: "agent", Category: "projects"},
+	})
 	if err != nil {
 		t.Fatalf("IngestFile() error = %v", err)
+	}
+
+	path, err := Create(cfg, d)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
 
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Errorf("source file was not removed: %v", err)
 	}
 
-	fm, body, err := ParseFrontmatter(path)
+	got, err := Parse(path)
 	if err != nil {
-		t.Fatalf("ParseFrontmatter() error = %v", err)
+		t.Fatalf("Parse() error = %v", err)
 	}
-	if fm.Category != "projects" {
-		t.Errorf("category = %q, want projects", fm.Category)
+	if got.Category != "projects" {
+		t.Errorf("category = %q, want projects", got.Category)
 	}
-	if fm.Synopsis != "ingested" {
-		t.Errorf("synopsis = %q, want ingested", fm.Synopsis)
+	if got.Synopsis != "ingested" {
+		t.Errorf("synopsis = %q, want ingested", got.Synopsis)
 	}
-	if fm.Source != "agent" {
-		t.Errorf("source = %q, want agent", fm.Source)
+	if got.Source != "agent" {
+		t.Errorf("source = %q, want agent", got.Source)
 	}
-	if body != content {
-		t.Errorf("body = %q, want %q", body, content)
+	wantBody := strings.TrimRight(content, "\n")
+	if got.Body != wantBody {
+		t.Errorf("body = %q, want %q", got.Body, wantBody)
 	}
 }
 
 func TestIngestFileMissingSource(t *testing.T) {
 	tmp := t.TempDir()
-	cfg := config.DefaultConfig(tmp)
 
-	_, err := IngestFile(cfg, filepath.Join(tmp, "missing.md"), "Filename", "synopsis", "test", "inbox", "")
+	_, err := IngestFile(Draft{
+		Filename: "Filename",
+		FromFile: filepath.Join(tmp, "missing.md"),
+		Metadata: Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"},
+	})
 	if err == nil {
 		t.Fatal("expected error for missing source file")
 	}
 }
 
-func TestIngestFileDirectory(t *testing.T) {
+func TestIngestFileDirectorySource(t *testing.T) {
 	tmp := t.TempDir()
-	cfg := config.DefaultConfig(tmp)
 
 	dir := filepath.Join(tmp, "adir")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatalf("Mkdir() error = %v", err)
 	}
 
-	_, err := IngestFile(cfg, dir, "Filename", "synopsis", "test", "inbox", "")
+	_, err := IngestFile(Draft{
+		Filename: "Filename",
+		FromFile: dir,
+		Metadata: Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"},
+	})
 	if err == nil {
 		t.Fatal("expected error for directory source path")
 	}
 }
 
-func TestExtractHeading(t *testing.T) {
-	tests := []struct {
-		name          string
-		body          string
-		wantHeading   string
-		wantRemaining string
-		wantOK        bool
-	}{
-		{
-			name:          "h1 at start",
-			body:          "# My Title\n\nbody content\n",
-			wantHeading:   "My Title",
-			wantRemaining: "body content",
-			wantOK:        true,
-		},
-		{
-			name:          "h1 after blank lines",
-			body:          "\n\n# Another Title\ncontent\n",
-			wantHeading:   "Another Title",
-			wantRemaining: "content",
-			wantOK:        true,
-		},
-		{
-			name:          "no h1",
-			body:          "just some text\n",
-			wantHeading:   "",
-			wantRemaining: "just some text",
-			wantOK:        false,
-		},
-		{
-			name:          "h2 not extracted",
-			body:          "## Section\n",
-			wantHeading:   "",
-			wantRemaining: "## Section",
-			wantOK:        false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			heading, remaining, ok := extractHeading(tt.body)
-			if ok != tt.wantOK {
-				t.Fatalf("extractHeading() ok = %v, want %v", ok, tt.wantOK)
-			}
-			if heading != tt.wantHeading {
-				t.Errorf("heading = %q, want %q", heading, tt.wantHeading)
-			}
-			if remaining != tt.wantRemaining {
-				t.Errorf("remaining = %q, want %q", remaining, tt.wantRemaining)
-			}
-		})
-	}
-}
-
-func TestExtractH1(t *testing.T) {
+func TestDraftH1(t *testing.T) {
 	tests := []struct {
 		name        string
 		body        string
 		wantHeading string
 		wantOK      bool
 	}{
-		{
-			name:        "h1 present",
-			body:        "# My Title\n\nbody\n",
-			wantHeading: "My Title",
-			wantOK:      true,
-		},
-		{
-			name:        "h1 after blank lines",
-			body:        "\n\n# Another Title\ncontent\n",
-			wantHeading: "Another Title",
-			wantOK:      true,
-		},
-		{
-			name:        "no h1",
-			body:        "just some text\n",
-			wantHeading: "",
-			wantOK:      false,
-		},
-		{
-			name:        "h2 not extracted",
-			body:        "## Section\n",
-			wantHeading: "",
-			wantOK:      false,
-		},
+		{"h1 at start", "# My Title\n\nbody content\n", "My Title", true},
+		{"h1 after blank lines", "\n\n# Another Title\ncontent\n", "Another Title", true},
+		{"no h1", "just some text\n", "", false},
+		{"h2 not extracted", "## Section\n", "", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			heading, ok := ExtractH1(tt.body)
+			d := Draft{Body: tt.body}
+			heading, ok := d.H1()
 			if ok != tt.wantOK {
-				t.Fatalf("ExtractH1() ok = %v, want %v", ok, tt.wantOK)
+				t.Fatalf("H1() ok = %v, want %v", ok, tt.wantOK)
 			}
 			if heading != tt.wantHeading {
-				t.Errorf("ExtractH1() heading = %q, want %q", heading, tt.wantHeading)
+				t.Errorf("H1() heading = %q, want %q", heading, tt.wantHeading)
 			}
 		})
 	}
 }
 
-func TestAddNote(t *testing.T) {
+func TestAdd(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
 	for i := range cfg.Categories {
@@ -312,15 +269,13 @@ func TestAddNote(t *testing.T) {
 	}
 
 	t.Run("all metadata no body creates note", func(t *testing.T) {
-		in := NoteInput{
+		d := Draft{
 			Filename: "test-note",
-			Synopsis: "a test",
-			Source:   "terminal",
-			Category: "inbox",
+			Metadata: Metadata{Synopsis: "a test", Source: "terminal", Category: "inbox"},
 		}
-		out, err := AddNote(cfg, in)
+		out, err := Add(cfg, d)
 		if err != nil {
-			t.Fatalf("AddNote() error = %v", err)
+			t.Fatalf("Add() error = %v", err)
 		}
 		if out.Form != nil {
 			t.Fatal("expected direct creation, got form")
@@ -328,12 +283,12 @@ func TestAddNote(t *testing.T) {
 		if out.Path == "" {
 			t.Fatal("expected path, got empty")
 		}
-		fm, _, err := ParseFrontmatter(out.Path)
+		got, err := Parse(out.Path)
 		if err != nil {
-			t.Fatalf("ParseFrontmatter() error = %v", err)
+			t.Fatalf("Parse() error = %v", err)
 		}
-		if fm.Synopsis != "a test" || fm.Source != "terminal" || fm.Category != "inbox" {
-			t.Errorf("frontmatter mismatch: %+v", fm)
+		if got.Synopsis != "a test" || got.Source != "terminal" || got.Category != "inbox" {
+			t.Errorf("frontmatter mismatch: %+v", got.Metadata)
 		}
 	})
 
@@ -343,17 +298,14 @@ func TestAddNote(t *testing.T) {
 		if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
-		in := NoteInput{
+		d := Draft{
 			Filename: "from-file",
-			Synopsis: "from file",
-			Source:   "migration",
-			Category: "archive",
-			Body:     content,
 			FromFile: src,
+			Metadata: Metadata{Synopsis: "from file", Source: "migration", Category: "archive"},
 		}
-		out, err := AddNote(cfg, in)
+		out, err := Add(cfg, d)
 		if err != nil {
-			t.Fatalf("AddNote() error = %v", err)
+			t.Fatalf("Add() error = %v", err)
 		}
 		if out.Form != nil {
 			t.Fatal("expected direct creation, got form")
@@ -361,97 +313,111 @@ func TestAddNote(t *testing.T) {
 		if _, err := os.Stat(src); !os.IsNotExist(err) {
 			t.Errorf("source file was not removed")
 		}
-		fm, body, err := ParseFrontmatter(out.Path)
+		got, err := Parse(out.Path)
 		if err != nil {
-			t.Fatalf("ParseFrontmatter() error = %v", err)
+			t.Fatalf("Parse() error = %v", err)
 		}
-		if fm.Category != "archive" || fm.Synopsis != "from file" || fm.Source != "migration" {
-			t.Errorf("frontmatter mismatch: %+v", fm)
+		if got.Category != "archive" || got.Synopsis != "from file" || got.Source != "migration" {
+			t.Errorf("frontmatter mismatch: %+v", got.Metadata)
 		}
-		if body != content {
-			t.Errorf("body = %q, want %q", body, content)
+		wantBody := strings.TrimRight(content, "\n")
+		if got.Body != wantBody {
+			t.Errorf("body = %q, want %q", got.Body, wantBody)
+		}
+	})
+
+	t.Run("from-file and body together returns error", func(t *testing.T) {
+		src := filepath.Join(tmp, "conflict.md")
+		if err := os.WriteFile(src, []byte("body from file\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		d := Draft{
+			Filename: "conflict",
+			FromFile: src,
+			Body:     "body from stdin\n",
+			Metadata: Metadata{Synopsis: "conflict", Source: "test", Category: "inbox"},
+		}
+		_, err := Add(cfg, d)
+		if err == nil {
+			t.Fatal("expected error when both --from-file and body are provided")
 		}
 	})
 
 	t.Run("stdin body without frontmatter and all metadata creates directly", func(t *testing.T) {
-		in := NoteInput{
+		d := Draft{
 			Filename: "piped",
-			Synopsis: "piped body",
-			Source:   "stdin",
-			Category: "projects",
 			Body:     "# Piped title\n\ntext\n",
+			Metadata: Metadata{Synopsis: "piped body", Source: "stdin", Category: "projects"},
 		}
-		out, err := AddNote(cfg, in)
+		out, err := Add(cfg, d)
 		if err != nil {
-			t.Fatalf("AddNote() error = %v", err)
+			t.Fatalf("Add() error = %v", err)
 		}
 		if out.Form != nil {
 			t.Fatal("expected direct creation, got form")
 		}
-		fm, body, err := ParseFrontmatter(out.Path)
+		got, err := Parse(out.Path)
 		if err != nil {
-			t.Fatalf("ParseFrontmatter() error = %v", err)
+			t.Fatalf("Parse() error = %v", err)
 		}
-		if fm.Category != "projects" {
-			t.Errorf("category = %q, want projects", fm.Category)
+		if got.Category != "projects" {
+			t.Errorf("category = %q, want projects", got.Category)
 		}
-		if body != "# Piped title\n\ntext\n" {
-			t.Errorf("body = %q, want %q", body, "# Piped title\n\ntext\n")
+		if got.Body != "# Piped title\n\ntext\n" {
+			t.Errorf("body = %q, want %q", got.Body, "# Piped title\n\ntext\n")
 		}
 	})
 
 	t.Run("body with frontmatter uses frontmatter values", func(t *testing.T) {
-		in := NoteInput{
+		d := Draft{
 			Body: "---\ncategory: areas\nsource: chat\nsynopsis: fm-driven\ncreated: 2026-07-01\n---\n\n# Title\n\nbody\n",
 		}
-		out, err := AddNote(cfg, in)
+		out, err := Add(cfg, d)
 		if err != nil {
-			t.Fatalf("AddNote() error = %v", err)
+			t.Fatalf("Add() error = %v", err)
 		}
 		if out.Form != nil {
 			t.Fatal("expected direct creation, got form")
 		}
-		fm, _, err := ParseFrontmatter(out.Path)
+		got, err := Parse(out.Path)
 		if err != nil {
-			t.Fatalf("ParseFrontmatter() error = %v", err)
+			t.Fatalf("Parse() error = %v", err)
 		}
-		if fm.Category != "areas" || fm.Source != "chat" || fm.Synopsis != "fm-driven" {
-			t.Errorf("frontmatter mismatch: %+v", fm)
+		if got.Category != "areas" || got.Source != "chat" || got.Synopsis != "fm-driven" {
+			t.Errorf("frontmatter mismatch: %+v", got.Metadata)
 		}
 	})
 
 	t.Run("body with frontmatter and explicit metadata uses explicit metadata", func(t *testing.T) {
-		in := NoteInput{
+		d := Draft{
 			Filename: "explicit",
-			Synopsis: "explicit",
-			Source:   "explicit",
-			Category: "archive",
 			Body:     "---\ncategory: areas\nsource: chat\nsynopsis: fm-driven\ncreated: 2026-07-01\n---\n\n# Title\n\nbody\n",
+			Metadata: Metadata{Synopsis: "explicit", Source: "explicit", Category: "archive"},
 		}
-		out, err := AddNote(cfg, in)
+		out, err := Add(cfg, d)
 		if err != nil {
-			t.Fatalf("AddNote() error = %v", err)
+			t.Fatalf("Add() error = %v", err)
 		}
 		if out.Form != nil {
 			t.Fatal("expected direct creation, got form")
 		}
-		fm, body, err := ParseFrontmatter(out.Path)
+		got, err := Parse(out.Path)
 		if err != nil {
-			t.Fatalf("ParseFrontmatter() error = %v", err)
+			t.Fatalf("Parse() error = %v", err)
 		}
-		if fm.Category != "archive" || fm.Source != "explicit" || fm.Synopsis != "explicit" {
-			t.Errorf("frontmatter mismatch: %+v", fm)
+		if got.Category != "archive" || got.Source != "explicit" || got.Synopsis != "explicit" {
+			t.Errorf("frontmatter mismatch: %+v", got.Metadata)
 		}
-		if strings.Contains(body, "fm-driven") {
+		if strings.Contains(got.Body, "fm-driven") {
 			t.Errorf("body still contains old frontmatter")
 		}
 	})
 
 	t.Run("missing metadata without body returns form", func(t *testing.T) {
-		in := NoteInput{Filename: "only-filename"}
-		out, err := AddNote(cfg, in)
+		d := Draft{Filename: "only-filename"}
+		out, err := Add(cfg, d)
 		if err != nil {
-			t.Fatalf("AddNote() error = %v", err)
+			t.Fatalf("Add() error = %v", err)
 		}
 		if out.Form == nil {
 			t.Fatal("expected form outcome")
@@ -459,12 +425,62 @@ func TestAddNote(t *testing.T) {
 	})
 
 	t.Run("body with incomplete frontmatter returns error", func(t *testing.T) {
-		in := NoteInput{
+		d := Draft{
 			Body: "---\ncategory: inbox\n---\n\nbody\n",
 		}
-		_, err := AddNote(cfg, in)
+		_, err := Add(cfg, d)
 		if err == nil {
 			t.Fatal("expected error for incomplete frontmatter")
+		}
+	})
+
+	t.Run("from-file without filename uses source basename", func(t *testing.T) {
+		src := filepath.Join(tmp, "rando-file.md")
+		content := "## Random\n\ncontent\n"
+		if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		d := Draft{
+			FromFile: src,
+			Metadata: Metadata{Synopsis: "from source file", Source: "migration", Category: "archive"},
+		}
+		out, err := Add(cfg, d)
+		if err != nil {
+			t.Fatalf("Add() error = %v", err)
+		}
+		if out.Form != nil {
+			t.Fatal("expected direct creation, got form")
+		}
+		if !strings.HasSuffix(out.Path, "rando-file.md") {
+			t.Errorf("path = %q, expected suffix rando-file.md", out.Path)
+		}
+		if _, err := os.Stat(src); !os.IsNotExist(err) {
+			t.Errorf("source file was not removed")
+		}
+	})
+
+	t.Run("from-file with missing metadata returns form with filename populated", func(t *testing.T) {
+		src := filepath.Join(tmp, "draft-note.md")
+		content := "plain body without frontmatter\n"
+		if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		d := Draft{
+			FromFile: src,
+			Metadata: Metadata{Source: "migration"},
+		}
+		out, err := Add(cfg, d)
+		if err != nil {
+			t.Fatalf("Add() error = %v", err)
+		}
+		if out.Form == nil {
+			t.Fatal("expected form outcome")
+		}
+		if out.Form.Filename != "draft-note.md" {
+			t.Errorf("form filename = %q, want draft-note.md", out.Form.Filename)
+		}
+		if out.Form.Source != "migration" {
+			t.Errorf("form source = %q, want migration", out.Form.Source)
 		}
 	})
 }

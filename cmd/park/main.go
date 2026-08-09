@@ -43,7 +43,7 @@ func Main() {
 
 	var (
 		parkRoot, parkConfig string
-		category             string
+		reclassifyCategory   string
 		newCategory          string
 	)
 
@@ -84,7 +84,7 @@ func Main() {
 				Name:  "assist",
 				Usage: "browse parked files and/or edit categories",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					if err := assistPark(cfg); err != nil {
+					if err := assistPark(cfg, cmd.Root().Writer); err != nil {
 						return styledExit(err, 1)
 					}
 					return nil
@@ -94,12 +94,14 @@ func Main() {
 				Name:  "config",
 				Usage: "print the loaded configuration",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					out, err := config.DumpConfig(cfg)
+					out, err := cfg.Dump()
 					if err != nil {
 						return styledExit(err, 1)
 					}
-					_, err = fmt.Fprint(cmd.Root().Writer, out)
-					return err
+					if _, err := fmt.Fprint(cmd.Root().Writer, out); err != nil {
+						return fmt.Errorf("write config output: %w", err)
+					}
+					return nil
 				},
 			},
 			{
@@ -113,7 +115,7 @@ func Main() {
 					if len(missing) > 0 {
 						for _, p := range missing {
 							if _, err := fmt.Fprintf(cmd.Root().Writer, "missing: %s\n", p); err != nil {
-								return err
+								return fmt.Errorf("write check output: %w", err)
 							}
 						}
 						return styledExit(fmt.Errorf("%d category folder(s) missing", len(missing)), 1)
@@ -129,9 +131,9 @@ func Main() {
 					if err != nil {
 						return styledExit(err, 1)
 					}
-					msg := formatInitMessage(created, existed)
+					msg := store.FormatInitResult(created, existed)
 					if _, err := fmt.Fprintln(cmd.Root().Writer, msg); err != nil {
-						return err
+						return fmt.Errorf("write init output: %w", err)
 					}
 					return nil
 				},
@@ -178,7 +180,7 @@ func Main() {
 					return ctx, nil
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					if err := addPark(cfg, cmd); err != nil {
+					if err := addPark(cfg, cmd, cmd.Root().Writer); err != nil {
 						return styledExit(err, 1)
 					}
 					return nil
@@ -194,7 +196,7 @@ func Main() {
 						Name:        "category",
 						Aliases:     []string{"c"},
 						Required:    true,
-						Destination: &category,
+						Destination: &reclassifyCategory,
 						Usage:       "category to move the note into",
 					},
 				},
@@ -202,13 +204,13 @@ func Main() {
 					if cmd.NArg() < 1 {
 						return ctx, styledExit(fmt.Errorf("usage: park reclassify <file> --category <category>"), 2)
 					}
-					if !cfg.HasCategory(category) {
-						return ctx, styledExit(fmt.Errorf("unknown category %q — valid: %s", category, strings.Join(cfg.CategoryNames(), ", ")), 2)
+					if !cfg.HasCategory(reclassifyCategory) {
+						return ctx, styledExit(fmt.Errorf("unknown category %q — valid: %s", reclassifyCategory, strings.Join(cfg.CategoryNames(), ", ")), 2)
 					}
 					return ctx, nil
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					if err := store.Reclassify(cfg, cmd.Args().First(), category); err != nil {
+					if err := store.Reclassify(cfg, cmd.Args().First(), reclassifyCategory); err != nil {
 						return styledExit(err, 1)
 					}
 					return nil
@@ -266,3 +268,4 @@ func styledError(e error) string {
 		Render(errorBullet, e.Error())
 	return header + "\n" + body
 }
+

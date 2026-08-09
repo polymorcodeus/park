@@ -12,7 +12,12 @@ import (
 
 func TestNewNoteFormModel(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
-	m, err := NewNoteFormModel(cfg, "filename", "synopsis", "source", "inbox", "body", "")
+	seed := note.Draft{
+		Filename: "filename",
+		Body:     "body",
+		Metadata: note.Metadata{Synopsis: "synopsis", Source: "source", Category: "inbox"},
+	}
+	m, err := NewNoteFormModel(cfg, seed)
 	if err != nil {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
@@ -36,7 +41,7 @@ func TestNewNoteFormModel(t *testing.T) {
 
 func TestNewNoteFormModelUnknownCategory(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
-	_, err := NewNoteFormModel(cfg, "", "", "", "nope", "", "")
+	_, err := NewNoteFormModel(cfg, note.Draft{Metadata: note.Metadata{Category: "nope"}})
 	if err == nil {
 		t.Fatal("expected error for unknown category")
 	}
@@ -49,7 +54,12 @@ func TestNoteFormModelSubmission(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	m, err := NewNoteFormModel(cfg, "Form Note", "form synopsis", "test", "inbox", "# Form Note\n", "")
+	seed := note.Draft{
+		Filename: "Form Note",
+		Body:     "# Form Note\n",
+		Metadata: note.Metadata{Synopsis: "form synopsis", Source: "test", Category: "inbox"},
+	}
+	m, err := NewNoteFormModel(cfg, seed)
 	if err != nil {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
@@ -83,7 +93,11 @@ func TestNoteFormModelRequiresSource(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	m, err := NewNoteFormModel(cfg, "Filename", "Synopsis", "", "inbox", "", "")
+	seed := note.Draft{
+		Filename: "Filename",
+		Metadata: note.Metadata{Synopsis: "Synopsis", Category: "inbox"},
+	}
+	m, err := NewNoteFormModel(cfg, seed)
 	if err != nil {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
@@ -93,17 +107,27 @@ func TestNoteFormModelRequiresSource(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected model type")
 	}
-	if final.err == nil {
+	if cmd == nil {
+		t.Fatal("expected validation command")
+	}
+
+	msg := cmd()
+	errMsg, ok := msg.(formErrorMsg)
+	if !ok {
+		t.Fatalf("expected formErrorMsg, got %T", msg)
+	}
+	if errMsg.err == nil {
 		t.Fatal("expected error for missing source")
 	}
-	if cmd != nil {
-		t.Fatal("expected no command when validation fails")
+	final.err = errMsg.err
+	if final.err == nil {
+		t.Fatal("expected error for missing source")
 	}
 }
 
 func TestNoteFormModelView(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
-	m, err := NewNoteFormModel(cfg, "", "", "", "inbox", "", "")
+	m, err := NewNoteFormModel(cfg, note.Draft{Metadata: note.Metadata{Category: "inbox"}})
 	if err != nil {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
@@ -113,7 +137,7 @@ func TestNoteFormModelView(t *testing.T) {
 
 func TestNoteFormModelCategoryNavigation(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
-	m, err := NewNoteFormModel(cfg, "", "", "", "inbox", "", "")
+	m, err := NewNoteFormModel(cfg, note.Draft{Metadata: note.Metadata{Category: "inbox"}})
 	if err != nil {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
@@ -132,7 +156,7 @@ func TestNoteFormModelCategoryNavigation(t *testing.T) {
 func TestNoteFormModelBodyCursorStartsAtTop(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	body := strings.Repeat("line\n", 20)
-	m, err := NewNoteFormModel(cfg, "", "", "", "inbox", body, "")
+	m, err := NewNoteFormModel(cfg, note.Draft{Body: body, Metadata: note.Metadata{Category: "inbox"}})
 	if err != nil {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
@@ -149,17 +173,25 @@ func TestNoteFormModelFilePreview(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
 	path := tmp + "/draft.md"
-	if err := note.WriteFrontmatter(path, note.Frontmatter{}, "# Draft\n\ncontent\n"); err != nil {
-		t.Fatalf("WriteFrontmatter() error = %v", err)
+	if err := note.Write(path, note.Note{Body: "# Draft\n\ncontent\n", Metadata: note.Metadata{Category: "inbox"}}); err != nil {
+		t.Fatalf("Write() error = %v", err)
 	}
 
-	m, err := NewNoteFormModel(cfg, "", "", "", "inbox", "", path)
+	m, err := NewNoteFormModel(cfg, note.Draft{FromFile: path, Metadata: note.Metadata{Category: "inbox"}})
 	if err != nil {
 		t.Fatalf("NewNoteFormModel() error = %v", err)
 	}
 	if m.hasBodyField() {
 		t.Fatal("expected body field to be hidden when from-file is set")
 	}
+
+	cmd := loadPreviewCmd(path)
+	msg := cmd()
+	previewMsg, ok := msg.(filePreviewLoadedMsg)
+	if !ok {
+		t.Fatalf("expected filePreviewLoadedMsg, got %T", msg)
+	}
+	m.filePreview = previewMsg.preview
 	if m.filePreview == "" {
 		t.Fatal("expected file preview to be populated")
 	}

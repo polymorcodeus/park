@@ -20,15 +20,15 @@ type listItem struct {
 }
 
 func (i listItem) Title() string {
-	created, _ := time.Parse("2006-01-02", i.item.Frontmatter.Created)
+	created, _ := time.Parse("2006-01-02", i.item.Created)
 	if created.IsZero() {
 		created = i.item.ModTime
 	}
 	return fmt.Sprintf("%s  ·  %s", i.item.Filename, humanAge(created))
 }
-func (i listItem) Description() string { return i.item.Frontmatter.Synopsis }
+func (i listItem) Description() string { return i.item.Synopsis }
 func (i listItem) FilterValue() string {
-	return i.item.Filename + " " + i.item.Frontmatter.Synopsis
+	return i.item.Filename + " " + i.item.Synopsis
 }
 
 // styledDelegate returns a list.DefaultDelegate with the themed foreground colors.
@@ -147,6 +147,9 @@ func NewAssistModel(cfg *config.Config) (AssistModel, error) {
 			break
 		}
 	}
+	if idx < 0 {
+		return AssistModel{}, fmt.Errorf("default category %q not found", cfg.DefaultCategory)
+	}
 
 	s := newStyles()
 	delegate := s.styledDelegate()
@@ -164,18 +167,6 @@ func NewAssistModel(cfg *config.Config) (AssistModel, error) {
 	m.list.SetShowHelp(false)
 	m.list.SetShowTitle(false)
 	m.list.SetShowStatusBar(false)
-	categoryName := cfg.Categories[idx].Name
-	items, err := store.Scan(cfg, categoryName)
-	if err != nil {
-		return AssistModel{}, err
-	}
-	listItems := make([]list.Item, len(items))
-	for i, it := range items {
-		listItems[i] = listItem{item: it}
-	}
-	m.list.SetItems(listItems)
-	// m.list.Title = fmt.Sprintf("%s (%d)", categoryName, len(listItems))
-
 	return m, nil
 }
 
@@ -250,7 +241,7 @@ func (m AssistModel) removeItem(target listItem) AssistModel {
 	return m
 }
 
-func (m AssistModel) Init() tea.Cmd { return nil }
+func (m AssistModel) Init() tea.Cmd { return m.loadItemsCmd() }
 
 // keeps assist and new TUI screens approx same size
 const maxListHeight = 28
@@ -259,8 +250,8 @@ func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = min(minWidth, msg.Width)
-		m.help.SetWidth(msg.Width)
-		m.list.SetSize(msg.Width, maxListHeight)
+		m.help.SetWidth(m.width)
+		m.list.SetSize(m.width, min(max(5, msg.Height-6), maxListHeight))
 
 	case itemsLoadedMsg:
 		currentCategory := m.cfg.Categories[m.categoryIdx].Name
@@ -290,6 +281,12 @@ func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = nil
+		if m.list.SettingFilter() {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			break
+		}
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
@@ -308,9 +305,6 @@ func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		default:
-			if m.list.SettingFilter() {
-				break
-			}
 			if cl, ok := m.cfg.CategoryByKey(msg.String()); ok {
 				currentCategory := m.cfg.Categories[m.categoryIdx].Name
 				if cl.Name == currentCategory {

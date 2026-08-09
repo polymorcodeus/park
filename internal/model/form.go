@@ -3,7 +3,6 @@ package model
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -95,17 +94,17 @@ func (s *styles) textInputStyles() textinput.Styles {
 	return st
 }
 
-// NewNoteFormModel builds a form model with the supplied initial values.
-func NewNoteFormModel(cfg *config.Config, filename, synopsis, source, category, body, fromFile string) (NoteFormModel, error) {
+// NewNoteFormModel builds a form model from a draft seed.
+func NewNoteFormModel(cfg *config.Config, seed note.Draft) (NoteFormModel, error) {
 	idx := -1
 	for i, cl := range cfg.Categories {
-		if cl.Name == category {
+		if cl.Name == seed.Category {
 			idx = i
 			break
 		}
 	}
 	if idx < 0 {
-		return NoteFormModel{}, fmt.Errorf("unknown category %q", category)
+		return NoteFormModel{}, fmt.Errorf("unknown category %q", seed.Category)
 	}
 
 	s := newStyles()
@@ -121,28 +120,28 @@ func NewNoteFormModel(cfg *config.Config, filename, synopsis, source, category, 
 		case 0:
 			ti.Prompt = "filename: "
 			ti.Placeholder = "note filename"
-			ti.SetValue(filename)
+			ti.SetValue(seed.Filename)
 		case 1:
 			ti.Prompt = "synopsis: "
 			ti.Placeholder = "one-line description"
-			ti.SetValue(synopsis)
+			ti.SetValue(seed.Synopsis)
 		case 2:
 			ti.Prompt = "source:   "
 			ti.Placeholder = "where this came from"
-			ti.SetValue(source)
+			ti.SetValue(seed.Source)
 		}
 		inputs[i] = ti
 	}
 
 	ta := textarea.New()
-	ta.Placeholder = "note body (optional)"
-	ta.SetValue(body)
+	ta.Placeholder = "note body"
+	ta.SetValue(seed.Body)
 	ta.SetStyles(textarea.DefaultStyles(true))
 	ta.MaxHeight = 10
 
-	var preview string
-	if fromFile != "" {
-		preview = previewFile(fromFile)
+	preview := ""
+	if seed.FromFile != "" {
+		preview = "(loading preview...)"
 	}
 
 	m := NoteFormModel{
@@ -151,9 +150,9 @@ func NewNoteFormModel(cfg *config.Config, filename, synopsis, source, category, 
 		bodyInput:       ta,
 		categoryIdx:     idx,
 		focusIndex:      0,
-		fromFile:        fromFile,
+		fromFile:        seed.FromFile,
 		filePreview:     preview,
-		bodyCursorReset: body != "",
+		bodyCursorReset: seed.Body != "",
 		styles:          s,
 		keys:            noteKeys,
 		width:           minWidth,
@@ -237,10 +236,6 @@ func (m NoteFormModel) categoryName() string {
 	return m.cfg.Categories[m.categoryIdx].Name
 }
 
-func (m NoteFormModel) canSubmit() bool {
-	return m.filename() != "" && m.synopsis() != "" && m.source() != ""
-}
-
 func (m NoteFormModel) body() string {
 	if m.fromFile != "" {
 		return ""
@@ -248,19 +243,35 @@ func (m NoteFormModel) body() string {
 	return strings.TrimRight(m.bodyInput.Value(), "\n")
 }
 
-// previewFile returns the first few lines of a file for display in the form.
+// previewFile returns the first few lines of a file's body for display in the
+// form. It uses note.Parse so the preview mirrors how the note will be stored.
 func previewFile(path string) string {
-	path = fs.ExpandPath(path)
-	data, err := os.ReadFile(path)
+	path, err := fs.ExpandPath(path)
+	if err != nil {
+		return fmt.Sprintf("(unable to expand %s: %v)", path, err)
+	}
+	n, err := note.Parse(path)
 	if err != nil {
 		return fmt.Sprintf("(unable to read %s: %v)", path, err)
 	}
-	lines := strings.Split(string(data), "\n")
+	lines := strings.Split(n.Body, "\n")
 	if len(lines) > maxFilePreviewLines {
 		lines = lines[:maxFilePreviewLines]
 		lines = append(lines, "...")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// filePreviewLoadedMsg carries the async-loaded file preview body.
+type filePreviewLoadedMsg struct {
+	preview string
+}
+
+// loadPreviewCmd reads the file preview off the UI thread.
+func loadPreviewCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		return filePreviewLoadedMsg{preview: previewFile(path)}
+	}
 }
 
 // submitMsg signals that the form should be submitted.
@@ -273,26 +284,31 @@ func (m NoteFormModel) submitCmd() tea.Cmd {
 }
 
 func (m NoteFormModel) createCmd() tea.Cmd {
-	filename := m.filename()
-	synopsis := m.synopsis()
-	source := m.source()
-	category := m.categoryName()
-	body := m.body()
-	fromFile := m.fromFile
+	d := note.Draft{
+		Filename: m.filename(),
+		Body:     m.body(),
+		FromFile: m.fromFile,
+		Metadata: note.Metadata{
+			Synopsis: m.synopsis(),
+			Source:   m.source(),
+			Category: m.categoryName(),
+		},
+	}
 	cfg := m.cfg
 
 	return func() tea.Msg {
-		var path string
-		var err error
-		if fromFile != "" {
-			path, err = note.IngestFile(cfg, fromFile, filename, synopsis, source, category, body)
-		} else {
-			path, err = note.NewWithBody(cfg, filename, synopsis, source, category, body)
-		}
+		outcome, err := note.Add(cfg, d)
 		if err != nil {
 			return formErrorMsg{err: err}
 		}
-		return formCreatedMsg{path: path}
+		if outcome.Form != nil {
+			missing := outcome.Form.MissingFields()
+			if len(missing) > 0 {
+				return formErrorMsg{err: fmt.Errorf("missing required fields: %s", strings.Join(missing, ", "))}
+			}
+			return formErrorMsg{err: fmt.Errorf("form submission incomplete")}
+		}
+		return formCreatedMsg{path: outcome.Path}
 	}
 }
 
@@ -301,7 +317,11 @@ type formErrorMsg struct{ err error }
 
 // Init implements tea.Model.
 func (m NoteFormModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, textarea.Blink, tea.RequestBackgroundColor)
+	cmds := []tea.Cmd{textinput.Blink, textarea.Blink, tea.RequestBackgroundColor}
+	if m.fromFile != "" {
+		cmds = append(cmds, loadPreviewCmd(m.fromFile))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
@@ -309,10 +329,11 @@ func (m NoteFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = min(minWidth, msg.Width)
+		inputWidth := max(20, m.width-20)
 		for i := range m.inputs {
-			m.inputs[i].SetWidth(msg.Width - 20)
+			m.inputs[i].SetWidth(inputWidth)
 		}
-		m.bodyInput.SetWidth(msg.Width - 20)
+		m.bodyInput.SetWidth(inputWidth)
 		m.bodyInput.SetHeight(minHeight)
 
 	case tea.BackgroundColorMsg:
@@ -326,11 +347,11 @@ func (m NoteFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, nil
 
+	case filePreviewLoadedMsg:
+		m.filePreview = msg.preview
+		return m, nil
+
 	case submitMsg:
-		if !m.canSubmit() {
-			m.err = fmt.Errorf("filename, synopsis, and source are required")
-			return m, nil
-		}
 		return m, m.createCmd()
 
 	case tea.KeyPressMsg:

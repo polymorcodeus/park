@@ -1,5 +1,5 @@
 // Command park is a standalone parking-lot for markdown notes, organized
-// as IPAA — Inbox / Projects / Areas / Archive, a PARA variant.
+// as IPAA: Inbox / Projects / Areas / Archive, a PARA variant.
 
 package main
 
@@ -19,14 +19,10 @@ var (
 	buildTime string
 )
 
-// use embedded VERSION file for local `go install`d version
-func init() {
+func main() {
 	if version == "" {
 		version = strings.TrimSpace(versionFile)
 	}
-}
-
-func main() {
 	cmd.SetVersion(version)
 	cmd.SetBuildTime(buildTime)
 	cmd.Main()

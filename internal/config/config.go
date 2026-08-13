@@ -25,7 +25,10 @@ func (c *Config) LoadConfig(root, configPath string) error {
 		return fmt.Errorf("config receiver is nil")
 	}
 
-	configPath = fs.ExpandPath(configPath)
+	configPath, err := fs.ExpandPath(configPath)
+	if err != nil {
+		return fmt.Errorf("expand config path: %w", err)
+	}
 	data, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
 		*c = *DefaultConfig(root)
@@ -41,7 +44,11 @@ func (c *Config) LoadConfig(root, configPath string) error {
 
 	// Expand ~ in paths
 	for i := range c.Categories {
-		c.Categories[i].Path = fs.ExpandPath(c.Categories[i].Path)
+		path, err := fs.ExpandPath(c.Categories[i].Path)
+		if err != nil {
+			return fmt.Errorf("expand category path %q: %w", c.Categories[i].Path, err)
+		}
+		c.Categories[i].Path = path
 	}
 
 	if err := c.Validate(); err != nil {
@@ -130,30 +137,18 @@ func (c Config) Dump() (string, error) {
 	return b.String(), nil
 }
 
-// DumpDefault returns the default config as a TOML string.
-func DumpDefault(root string) (string, error) {
-	cfg := DefaultConfig(root)
-	var b strings.Builder
-	enc := toml.NewEncoder(&b)
-	if err := enc.Encode(cfg); err != nil {
-		return "", fmt.Errorf("encode config: %w", err)
-	}
-	return b.String(), nil
-}
-
-// DumpConfig returns the loaded config as a TOML string.
-func DumpConfig(cfg *Config) (string, error) {
-	var b strings.Builder
-	enc := toml.NewEncoder(&b)
-	if err := enc.Encode(cfg); err != nil {
-		return "", fmt.Errorf("encode config: %w", err)
-	}
-	return b.String(), nil
-}
-
 // DefaultConfigPath returns the default path to the park configuration file.
 func DefaultConfigPath() string {
-	return filepath.Join(DefaultRootPath(), "config")
+	return DefaultConfigPathFor(DefaultRootPath())
+}
+
+// DefaultConfigPathFor returns the default configuration path under the given
+// root. An empty root falls back to DefaultRootPath().
+func DefaultConfigPathFor(root string) string {
+	if root == "" {
+		root = DefaultRootPath()
+	}
+	return filepath.Join(root, "config")
 }
 
 // DefaultRootPath returns the park root directory.
@@ -165,15 +160,19 @@ func DefaultConfigPath() string {
 //     ~/.config/park on Linux and other Unix systems).
 //  3. $HOME/.config/park if os.UserConfigDir fails.
 func DefaultRootPath() string {
-	if os.Getenv("XDG_CONFIG_HOME") == "" {
-		rootDir, err := os.UserConfigDir()
-		if err != nil {
-			rootDir = filepath.Join(fs.ExpandPath("~"), ".config")
-		}
-		return filepath.Join(rootDir, "park")
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "park")
 	}
 
-	return filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "park")
+	rootDir, err := os.UserConfigDir()
+	if err != nil {
+		home, homeErr := fs.ExpandPath("~")
+		if homeErr != nil {
+			return ""
+		}
+		rootDir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(rootDir, "park")
 }
 
 // Category defines a single category (inbox, project, area, archive, or

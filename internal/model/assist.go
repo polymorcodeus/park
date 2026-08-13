@@ -9,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/polymorcodeus/park/internal/config"
 	"github.com/polymorcodeus/park/internal/store"
 )
@@ -20,15 +19,15 @@ type listItem struct {
 }
 
 func (i listItem) Title() string {
-	created, _ := time.Parse("2006-01-02", i.item.Frontmatter.Created)
+	created, _ := time.Parse("2006-01-02", i.item.Created)
 	if created.IsZero() {
 		created = i.item.ModTime
 	}
 	return fmt.Sprintf("%s  ·  %s", i.item.Filename, humanAge(created))
 }
-func (i listItem) Description() string { return i.item.Frontmatter.Synopsis }
+func (i listItem) Description() string { return i.item.Synopsis }
 func (i listItem) FilterValue() string {
-	return i.item.Filename + " " + i.item.Frontmatter.Synopsis
+	return i.item.Filename + " " + i.item.Synopsis
 }
 
 // styledDelegate returns a list.DefaultDelegate with the themed foreground colors.
@@ -147,6 +146,9 @@ func NewAssistModel(cfg *config.Config) (AssistModel, error) {
 			break
 		}
 	}
+	if idx < 0 {
+		return AssistModel{}, fmt.Errorf("default category %q not found", cfg.DefaultCategory)
+	}
 
 	s := newStyles()
 	delegate := s.styledDelegate()
@@ -164,79 +166,59 @@ func NewAssistModel(cfg *config.Config) (AssistModel, error) {
 	m.list.SetShowHelp(false)
 	m.list.SetShowTitle(false)
 	m.list.SetShowStatusBar(false)
-	categoryName := cfg.Categories[idx].Name
-	items, err := store.Scan(cfg, categoryName)
-	if err != nil {
-		return AssistModel{}, err
-	}
-	listItems := make([]list.Item, len(items))
-	for i, it := range items {
-		listItems[i] = listItem{item: it}
-	}
-	m.list.SetItems(listItems)
-	// m.list.Title = fmt.Sprintf("%s (%d)", categoryName, len(listItems))
-
 	return m, nil
 }
 
 func (m AssistModel) switchCategory(delta int) AssistModel {
-	m.categoryIdx += delta
-	if m.categoryIdx < 0 {
-		m.categoryIdx = len(m.cfg.Categories) - 1
-	} else if m.categoryIdx >= len(m.cfg.Categories) {
-		m.categoryIdx = 0
-	}
+	m.categoryIdx = cycleIndex(m.categoryIdx, delta, len(m.cfg.Categories))
 	return m
 }
 
-// itemsLoadedMsg carries the items for a category after an async load.
-type itemsLoadedMsg struct {
+// loadResult carries the outcome of an async category load back to Update:
+// either the loaded items (err == nil) or a load error.
+type loadResult struct {
 	categoryName string
 	items        []list.Item
-}
-
-// errMsg carries a load error back to Update.
-type errMsg struct {
-	categoryName string
 	err          error
 }
 
-// reclassifiedMsg signals that the selected item was moved to a new category.
-type reclassifiedMsg struct{ item listItem }
+// reclassifyResult carries the outcome of an async reclassify back to
+// Update: either the moved item (err == nil) or a reclassify error.
+type reclassifyResult struct {
+	item listItem
+	err  error
+}
 
-// reclassifyErrMsg carries an error from an async reclassify command.
-type reclassifyErrMsg struct{ err error }
-
-func (m *AssistModel) loadItemsCmd() tea.Cmd {
+func (m AssistModel) loadItemsCmd() tea.Cmd {
 	categoryName := m.cfg.Categories[m.categoryIdx].Name
 	cfg := m.cfg
 	return func() tea.Msg {
 		items, err := store.Scan(cfg, categoryName)
 		if err != nil {
-			return errMsg{categoryName: categoryName, err: err}
+			return loadResult{categoryName: categoryName, err: err}
 		}
 		listItems := make([]list.Item, len(items))
 		for i, it := range items {
 			listItems[i] = listItem{item: it}
 		}
-		return itemsLoadedMsg{categoryName: categoryName, items: listItems}
+		return loadResult{categoryName: categoryName, items: listItems}
 	}
 }
 
-func (m *AssistModel) reclassifyCmd(targetCategory string) tea.Cmd {
+func (m AssistModel) reclassifyCmd(targetCategory string) tea.Cmd {
 	it, ok := m.list.SelectedItem().(listItem)
 	if !ok {
 		return func() tea.Msg {
-			return reclassifyErrMsg{err: fmt.Errorf("no item selected")}
+			return reclassifyResult{err: fmt.Errorf("no item selected")}
 		}
 	}
 	filename := it.item.Filename
 	cfg := m.cfg
 	return func() tea.Msg {
 		if err := store.Reclassify(cfg, filename, targetCategory); err != nil {
-			return reclassifyErrMsg{err: err}
+			return reclassifyResult{err: err}
 		}
-		return reclassifiedMsg{item: it}
+		return reclassifyResult{item: it}
 	}
 }
 
@@ -250,7 +232,7 @@ func (m AssistModel) removeItem(target listItem) AssistModel {
 	return m
 }
 
-func (m AssistModel) Init() tea.Cmd { return nil }
+func (m AssistModel) Init() tea.Cmd { return m.loadItemsCmd() }
 
 // keeps assist and new TUI screens approx same size
 const maxListHeight = 28
@@ -259,12 +241,16 @@ func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = min(minWidth, msg.Width)
-		m.help.SetWidth(msg.Width)
-		m.list.SetSize(msg.Width, maxListHeight)
+		m.help.SetWidth(m.width)
+		m.list.SetSize(m.width, min(max(5, msg.Height-6), maxListHeight))
 
-	case itemsLoadedMsg:
+	case loadResult:
 		currentCategory := m.cfg.Categories[m.categoryIdx].Name
 		if msg.categoryName != currentCategory {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.err = msg.err
 			return m, nil
 		}
 		m.list.SetItems(msg.items)
@@ -272,24 +258,23 @@ func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		return m, nil
 
-	case errMsg:
-		if msg.categoryName != m.cfg.Categories[m.categoryIdx].Name {
+	case reclassifyResult:
+		if msg.err != nil {
+			m.err = msg.err
 			return m, nil
 		}
-		m.err = msg.err
-		return m, nil
-
-	case reclassifiedMsg:
 		m = m.removeItem(msg.item)
 		m.err = nil
 		return m, nil
 
-	case reclassifyErrMsg:
-		m.err = msg.err
-		return m, nil
-
 	case tea.KeyPressMsg:
 		m.err = nil
+		if m.list.SettingFilter() {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			break
+		}
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
@@ -308,9 +293,6 @@ func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		default:
-			if m.list.SettingFilter() {
-				break
-			}
 			if cl, ok := m.cfg.CategoryByKey(msg.String()); ok {
 				currentCategory := m.cfg.Categories[m.categoryIdx].Name
 				if cl.Name == currentCategory {
@@ -335,24 +317,7 @@ func (m AssistModel) View() tea.View {
 	doc := strings.Builder{}
 	s := m.styles
 
-	var renderedTabs []string
-	for i, cl := range m.cfg.Categories {
-		var style lipgloss.Style
-		isActive := i == m.categoryIdx
-		if isActive {
-			style = s.activeTab
-		} else {
-			style = s.inactiveTab
-		}
-
-		renderedTabs = append(renderedTabs, style.Render(cl.Name))
-	}
-
-	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
-
-	gapWidth := max(0, m.width-lipgloss.Width(row))
-	gap := s.topBorder.Render(strings.Repeat(" ", gapWidth))
-	header := lipgloss.JoinHorizontal(lipgloss.Bottom, row, gap)
+	header := s.renderTabs(m.cfg.Categories, m.categoryIdx, m.width, false)
 
 	doc.WriteString(header)
 	doc.WriteString("\n")

@@ -2,29 +2,31 @@
 package fs
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
 
-func homeDir() string {
-	dir, err := os.UserHomeDir()
+// ExpandPath expands a leading `~` or `$HOME` in path using the user's home
+// directory. It returns the path unchanged if no expansion is needed.
+func ExpandPath(path string) (string, error) {
+	if !strings.HasPrefix(path, "~") && !strings.HasPrefix(path, "$HOME") {
+		return path, nil
+	}
+
+	home, err := os.UserHomeDir()
 	if err != nil {
-		dir = os.Getenv("HOME")
+		home = os.Getenv("HOME")
+		if home == "" {
+			return "", fmt.Errorf("cannot expand home in path %q: %w", path, err)
+		}
 	}
-	return dir
-}
 
-func ExpandPath(path string) string {
-	home := homeDir()
-
-	// Expand ~
 	if after, ok := strings.CutPrefix(path, "~"); ok {
-		return home + after
+		return home + after, nil
 	}
-	// Expand $HOME
 	if after, ok := strings.CutPrefix(path, "$HOME"); ok {
-		return home + after
+		return home + after, nil
 	}
-
-	return path
+	return path, nil
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/urfave/cli/v3"
@@ -15,6 +14,9 @@ import (
 	"github.com/polymorcodeus/park/internal/render"
 )
 
+// isTerminal reports whether the given file descriptor is connected to an
+// interactive terminal. It is used for both stdin (see stdinIsTTY) and stderr
+// (for styled error output).
 func isTerminal(f *os.File) bool {
 	info, err := f.Stat()
 	if err != nil {
@@ -28,50 +30,57 @@ func stdinIsTTY() bool {
 	return isTerminal(os.Stdin)
 }
 
+// draftFromCmd builds a note.Draft from the CLI flags and positional args.
+func draftFromCmd(cmd *cli.Command) note.Draft {
+	d := note.Draft{
+		Filename: cmd.String("filename"),
+		Metadata: note.Metadata{
+			Synopsis: cmd.String("synopsis"),
+			Source:   cmd.String("source"),
+			Category: cmd.String("category"),
+		},
+		FromFile: cmd.String("from-file"),
+	}
+	if d.Filename == "" {
+		d.Filename = cmd.Args().First()
+	}
+	return d
+}
+
+// printParked writes the standard "parked: <path>" confirmation.
+func printParked(w io.Writer, path string) error {
+	if _, err := fmt.Fprintln(w, "parked:", path); err != nil {
+		return fmt.Errorf("write output: %w", err)
+	}
+	return nil
+}
+
 // addPark parks a new note. It reads CLI input and delegates the creation
 // decision to internal/note. If the input is incomplete, it opens the
 // bubbletea form for the missing metadata.
-func addPark(cfg *config.Config, cmd *cli.Command) error {
-	in := note.NoteInput{
-		Filename: cmd.String("filename"),
-		Synopsis: cmd.String("synopsis"),
-		Source:   cmd.String("source"),
-		Category: cmd.String("category"),
-		FromFile: cmd.String("from-file"),
-	}
-	if in.Filename == "" {
-		in.Filename = cmd.Args().First()
-	}
+func addPark(cfg *config.Config, cmd *cli.Command, w io.Writer) error {
+	d := draftFromCmd(cmd)
 
-	if in.FromFile != "" {
-		data, err := os.ReadFile(in.FromFile)
-		if err != nil {
-			return fmt.Errorf("from-file: %w", err)
-		}
-		in.Body = string(data)
-	} else if !stdinIsTTY() {
+	if !stdinIsTTY() {
 		data, err := io.ReadAll(cmd.Reader)
 		if err != nil {
 			return fmt.Errorf("read stdin: %w", err)
 		}
-		in.Body = string(data)
+		d.Body = string(data)
 	}
 
-	outcome, err := note.AddNote(cfg, in)
+	outcome, err := note.Add(cfg, d)
 	if err != nil {
 		return err
 	}
 	if outcome.Path != "" {
-		if _, err := fmt.Fprintln(cmd.Root().Writer, "parked:", outcome.Path); err != nil {
-			return err
-		}
-		return nil
+		return printParked(w, outcome.Path)
 	}
-	return runNoteForm(cfg, cmd, outcome.Form)
+	return runNoteForm(cfg, w, outcome.Form)
 }
 
-func runNoteForm(cfg *config.Config, cmd *cli.Command, form *note.NoteForm) error {
-	m, err := model.NewNoteFormModel(cfg, form.Filename, form.Synopsis, form.Source, form.Category, form.Body, form.FromFile)
+func runNoteForm(cfg *config.Config, w io.Writer, seed *note.Draft) error {
+	m, err := model.NewNoteFormModel(cfg, *seed)
 	if err != nil {
 		return err
 	}
@@ -90,27 +99,12 @@ func runNoteForm(cfg *config.Config, cmd *cli.Command, form *note.NoteForm) erro
 		return res.Err
 	}
 	if res.Path != "" {
-		if _, err := fmt.Fprintln(cmd.Root().Writer, "parked:", res.Path); err != nil {
-			return err
-		}
+		return printParked(w, res.Path)
 	}
 	return nil
 }
 
-// formatInitMessage formats the result of store.Init for user-facing output.
-func formatInitMessage(created, existed []string) string {
-	if len(created) == 0 {
-		return "all park folders already exist"
-	}
-
-	msg := fmt.Sprintf("created park folders: %s", strings.Join(created, ", "))
-	if len(existed) > 0 {
-		msg += fmt.Sprintf(" (%s already existed)", strings.Join(existed, ", "))
-	}
-	return msg
-}
-
-func assistPark(cfg *config.Config) error {
+func assistPark(cfg *config.Config, w io.Writer) error {
 	m, err := model.NewAssistModel(cfg)
 	if err != nil {
 		return err
@@ -126,7 +120,7 @@ func assistPark(cfg *config.Config) error {
 		return fmt.Errorf("unexpected model type from assist")
 	}
 	if final.ViewFile != "" {
-		if err := render.ShowFile(final.ViewFile, os.Stdout); err != nil {
+		if err := render.ShowFile(final.ViewFile, w); err != nil {
 			return err
 		}
 	}

@@ -16,10 +16,10 @@ import (
 
 // Item is a single parked note as seen by the scanner/TUI.
 type Item struct {
-	Path        string
-	Filename    string
-	Frontmatter note.Frontmatter
-	ModTime     time.Time
+	note.Metadata
+	Path     string
+	Filename string
+	ModTime  time.Time
 }
 
 // Init creates the category folders defined in cfg. It returns the paths
@@ -69,7 +69,7 @@ func Check(cfg *config.Config) ([]string, error) {
 func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 	cl, ok := cfg.CategoryByName(categoryName)
 	if !ok {
-		return nil, fmt.Errorf("unknown category %q — valid: %s", categoryName, strings.Join(cfg.CategoryNames(), ", "))
+		return nil, fmt.Errorf("unknown category %q; valid: %s", categoryName, strings.Join(cfg.CategoryNames(), ", "))
 	}
 
 	entries, err := os.ReadDir(cl.Path)
@@ -86,7 +86,7 @@ func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 			continue
 		}
 		path := filepath.Join(cl.Path, e.Name())
-		fm, _, err := note.ParseFrontmatter(path)
+		n, err := note.Parse(path)
 		if err != nil {
 			return nil, fmt.Errorf("parse frontmatter for %q: %w", path, err)
 		}
@@ -95,10 +95,10 @@ func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 			return nil, fmt.Errorf("stat %q: %w", path, err)
 		}
 		items = append(items, Item{
-			Path:        path,
-			Filename:    e.Name(),
-			Frontmatter: fm,
-			ModTime:     info.ModTime(),
+			Metadata: n.Metadata,
+			Path:     path,
+			Filename: e.Name(),
+			ModTime:  info.ModTime(),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -113,18 +113,17 @@ func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 func Reclassify(cfg *config.Config, filename string, targetCategory string) error {
 	cl, ok := cfg.CategoryByName(targetCategory)
 	if !ok {
-		return fmt.Errorf("unknown category %q — valid: %s", targetCategory, strings.Join(cfg.CategoryNames(), ", "))
+		return fmt.Errorf("unknown category %q; valid: %s", targetCategory, strings.Join(cfg.CategoryNames(), ", "))
 	}
 
 	var src string
-	var fm note.Frontmatter
-	var body string
+	var n note.Note
 	for _, c := range cfg.Categories {
 		candidate := filepath.Join(c.Path, filename)
 		if _, statErr := os.Stat(candidate); statErr == nil {
 			src = candidate
 			var parseErr error
-			fm, body, parseErr = note.ParseFrontmatter(candidate)
+			n, parseErr = note.Parse(candidate)
 			if parseErr != nil {
 				return fmt.Errorf("parse frontmatter for %q: %w", candidate, parseErr)
 			}
@@ -139,12 +138,18 @@ func Reclassify(cfg *config.Config, filename string, targetCategory string) erro
 		return fmt.Errorf("already in %s", targetCategory)
 	}
 
-	fm.Category = targetCategory
+	n.Category = targetCategory
 	dst := filepath.Join(cl.Path, filename)
 
-	// Rewrite frontmatter in place first, then move — if the move fails
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("already exists in %s: %s", targetCategory, filename)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("check destination %q: %w", dst, err)
+	}
+
+	// Rewrite frontmatter in place first, then move; if the move fails
 	// (e.g. cross-device), the file is still left in a consistent state.
-	if err := note.WriteFrontmatter(src, fm, body); err != nil {
+	if err := note.Write(src, n); err != nil {
 		return fmt.Errorf("rewrite frontmatter for %q: %w", src, err)
 	}
 	if err := os.Rename(src, dst); err != nil {
@@ -153,17 +158,31 @@ func Reclassify(cfg *config.Config, filename string, targetCategory string) erro
 	return nil
 }
 
+// FormatInitResult formats the result of Init for user-facing output.
+func FormatInitResult(created, existed []string) string {
+	if len(created) == 0 {
+		return "all park folders already exist"
+	}
+
+	msg := fmt.Sprintf("created park folders: %s", strings.Join(created, ", "))
+	if len(existed) > 0 {
+		msg += fmt.Sprintf(" (%s already existed)", strings.Join(existed, ", "))
+	}
+	return msg
+}
+
 // ResolvePath accepts either a bare filename (searched across all category
-// folders) or a full path used as-is.
-func ResolvePath(cfg *config.Config, filename string) string {
+// folders) or a full path used as-is. It returns os.ErrNotExist when no file
+// can be resolved.
+func ResolvePath(cfg *config.Config, filename string) (string, error) {
 	if _, err := os.Stat(filename); err == nil {
-		return filename
+		return filename, nil
 	}
 	for _, cl := range cfg.Categories {
 		p := filepath.Join(cl.Path, filename)
 		if _, err := os.Stat(p); err == nil {
-			return p
+			return p, nil
 		}
 	}
-	return filename
+	return "", os.ErrNotExist
 }

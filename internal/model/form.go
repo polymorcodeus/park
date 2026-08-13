@@ -3,17 +3,16 @@ package model
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/polymorcodeus/park/internal/config"
 	"github.com/polymorcodeus/park/internal/fs"
 	"github.com/polymorcodeus/park/internal/note"
+	"github.com/polymorcodeus/park/internal/theme"
 )
 
 const maxFilePreviewLines = 6
@@ -60,6 +59,20 @@ var noteKeys = noteKeyMap{
 	),
 }
 
+// formField identifies a focusable field in the note form. Its ordering
+// mirrors the visual layout (filename → synopsis → source → body →
+// category → submit); fieldBody is skipped when the form has no body field.
+type formField int
+
+const (
+	fieldFilename formField = iota
+	fieldSynopsis
+	fieldSource
+	fieldBody
+	fieldCategory
+	fieldSubmit
+)
+
 // NoteFormModel is a bubbletea form for interactively creating or ingesting a
 // parked note. Pre-filled values come from CLI flags; missing fields are
 // collected here.
@@ -68,7 +81,8 @@ type NoteFormModel struct {
 	inputs          []textinput.Model
 	bodyInput       textarea.Model
 	categoryIdx     int
-	focusIndex      int
+	fields          []formField // focusable fields in tab order for this form
+	focusIndex      int         // index into fields, not a formField itself
 	fromFile        string
 	filePreview     string
 	bodyCursorReset bool
@@ -95,17 +109,17 @@ func (s *styles) textInputStyles() textinput.Styles {
 	return st
 }
 
-// NewNoteFormModel builds a form model with the supplied initial values.
-func NewNoteFormModel(cfg *config.Config, filename, synopsis, source, category, body, fromFile string) (NoteFormModel, error) {
+// NewNoteFormModel builds a form model from a draft seed.
+func NewNoteFormModel(cfg *config.Config, seed note.Draft) (NoteFormModel, error) {
 	idx := -1
 	for i, cl := range cfg.Categories {
-		if cl.Name == category {
+		if cl.Name == seed.Category {
 			idx = i
 			break
 		}
 	}
 	if idx < 0 {
-		return NoteFormModel{}, fmt.Errorf("unknown category %q", category)
+		return NoteFormModel{}, fmt.Errorf("unknown category %q", seed.Category)
 	}
 
 	s := newStyles()
@@ -121,39 +135,46 @@ func NewNoteFormModel(cfg *config.Config, filename, synopsis, source, category, 
 		case 0:
 			ti.Prompt = "filename: "
 			ti.Placeholder = "note filename"
-			ti.SetValue(filename)
+			ti.SetValue(seed.Filename)
 		case 1:
 			ti.Prompt = "synopsis: "
 			ti.Placeholder = "one-line description"
-			ti.SetValue(synopsis)
+			ti.SetValue(seed.Synopsis)
 		case 2:
 			ti.Prompt = "source:   "
 			ti.Placeholder = "where this came from"
-			ti.SetValue(source)
+			ti.SetValue(seed.Source)
 		}
 		inputs[i] = ti
 	}
 
 	ta := textarea.New()
-	ta.Placeholder = "note body (optional)"
-	ta.SetValue(body)
+	ta.Placeholder = "note body"
+	ta.SetValue(seed.Body)
 	ta.SetStyles(textarea.DefaultStyles(true))
 	ta.MaxHeight = 10
 
-	var preview string
-	if fromFile != "" {
-		preview = previewFile(fromFile)
+	preview := ""
+	if seed.FromFile != "" {
+		preview = "(loading preview...)"
 	}
+
+	fields := []formField{fieldFilename, fieldSynopsis, fieldSource}
+	if seed.FromFile == "" {
+		fields = append(fields, fieldBody)
+	}
+	fields = append(fields, fieldCategory, fieldSubmit)
 
 	m := NoteFormModel{
 		cfg:             cfg,
 		inputs:          inputs,
 		bodyInput:       ta,
 		categoryIdx:     idx,
+		fields:          fields,
 		focusIndex:      0,
-		fromFile:        fromFile,
+		fromFile:        seed.FromFile,
 		filePreview:     preview,
-		bodyCursorReset: body != "",
+		bodyCursorReset: seed.Body != "",
 		styles:          s,
 		keys:            noteKeys,
 		width:           minWidth,
@@ -167,43 +188,35 @@ func (m NoteFormModel) hasBodyField() bool {
 	return m.fromFile == ""
 }
 
-func (m NoteFormModel) bodyIndex() int {
-	if !m.hasBodyField() {
-		return -1
-	}
-	return 3
+// currentField returns the formField the cursor is currently on.
+func (m NoteFormModel) currentField() formField {
+	return m.fields[m.focusIndex]
 }
 
-func (m NoteFormModel) categoryIndex() int {
-	if !m.hasBodyField() {
-		return 3
-	}
-	return 4
-}
-
-func (m NoteFormModel) submitIndex() int {
-	if !m.hasBodyField() {
-		return 4
-	}
-	return 5
-}
-
-func (m NoteFormModel) lastIndex() int {
-	return m.submitIndex()
+// advanceFocus moves focusIndex forward or backward by delta, wrapping
+// around the ends of m.fields. There is no longer a need to special-case
+// the body field: it's simply absent from m.fields when there's no body.
+func (m NoteFormModel) advanceFocus(delta int) NoteFormModel {
+	m.focusIndex = cycleIndex(m.focusIndex, delta, len(m.fields))
+	return m
 }
 
 // updateFocus applies focus/blur to every field based on the current focus
 // index and returns the collected commands.
 func (m NoteFormModel) updateFocus() (NoteFormModel, tea.Cmd) {
 	cmds := make([]tea.Cmd, 0, 6)
+	cur := m.currentField()
+
+	// inputs[0..2] correspond 1:1 to fieldFilename..fieldSource.
 	for i := range m.inputs {
-		if i == m.focusIndex {
+		if formField(i) == cur {
 			cmds = append(cmds, m.inputs[i].Focus())
 			continue
 		}
 		m.inputs[i].Blur()
 	}
-	if m.hasBodyField() && m.focusIndex == m.bodyIndex() {
+
+	if cur == fieldBody {
 		cmds = append(cmds, m.bodyInput.Focus())
 		if m.bodyCursorReset {
 			m.bodyInput.CursorStart()
@@ -237,10 +250,6 @@ func (m NoteFormModel) categoryName() string {
 	return m.cfg.Categories[m.categoryIdx].Name
 }
 
-func (m NoteFormModel) canSubmit() bool {
-	return m.filename() != "" && m.synopsis() != "" && m.source() != ""
-}
-
 func (m NoteFormModel) body() string {
 	if m.fromFile != "" {
 		return ""
@@ -248,19 +257,35 @@ func (m NoteFormModel) body() string {
 	return strings.TrimRight(m.bodyInput.Value(), "\n")
 }
 
-// previewFile returns the first few lines of a file for display in the form.
+// previewFile returns the first few lines of a file's body for display in the
+// form. It uses note.Parse so the preview mirrors how the note will be stored.
 func previewFile(path string) string {
-	path = fs.ExpandPath(path)
-	data, err := os.ReadFile(path)
+	path, err := fs.ExpandPath(path)
+	if err != nil {
+		return fmt.Sprintf("(unable to expand %s: %v)", path, err)
+	}
+	n, err := note.Parse(path)
 	if err != nil {
 		return fmt.Sprintf("(unable to read %s: %v)", path, err)
 	}
-	lines := strings.Split(string(data), "\n")
+	lines := strings.Split(n.Body, "\n")
 	if len(lines) > maxFilePreviewLines {
 		lines = lines[:maxFilePreviewLines]
 		lines = append(lines, "...")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// filePreviewLoadedMsg carries the async-loaded file preview body.
+type filePreviewLoadedMsg struct {
+	preview string
+}
+
+// loadPreviewCmd reads the file preview off the UI thread.
+func loadPreviewCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		return filePreviewLoadedMsg{preview: previewFile(path)}
+	}
 }
 
 // submitMsg signals that the form should be submitted.
@@ -273,35 +298,48 @@ func (m NoteFormModel) submitCmd() tea.Cmd {
 }
 
 func (m NoteFormModel) createCmd() tea.Cmd {
-	filename := m.filename()
-	synopsis := m.synopsis()
-	source := m.source()
-	category := m.categoryName()
-	body := m.body()
-	fromFile := m.fromFile
+	d := note.Draft{
+		Filename: m.filename(),
+		Body:     m.body(),
+		FromFile: m.fromFile,
+		Metadata: note.Metadata{
+			Synopsis: m.synopsis(),
+			Source:   m.source(),
+			Category: m.categoryName(),
+		},
+	}
 	cfg := m.cfg
 
 	return func() tea.Msg {
-		var path string
-		var err error
-		if fromFile != "" {
-			path, err = note.IngestFile(cfg, fromFile, filename, synopsis, source, category, body)
-		} else {
-			path, err = note.NewWithBody(cfg, filename, synopsis, source, category, body)
-		}
+		outcome, err := note.Add(cfg, d)
 		if err != nil {
-			return formErrorMsg{err: err}
+			return createResult{err: err}
 		}
-		return formCreatedMsg{path: path}
+		if outcome.Form != nil {
+			missing := outcome.Form.MissingFields()
+			if len(missing) > 0 {
+				return createResult{err: fmt.Errorf("missing required fields: %s", strings.Join(missing, ", "))}
+			}
+			return createResult{err: fmt.Errorf("form submission incomplete")}
+		}
+		return createResult{path: outcome.Path}
 	}
 }
 
-type formCreatedMsg struct{ path string }
-type formErrorMsg struct{ err error }
+// createResult carries the outcome of an async note creation back to
+// Update: either the created note's path (err == nil) or a creation error.
+type createResult struct {
+	path string
+	err  error
+}
 
 // Init implements tea.Model.
 func (m NoteFormModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, textarea.Blink, tea.RequestBackgroundColor)
+	cmds := []tea.Cmd{textinput.Blink, textarea.Blink, tea.RequestBackgroundColor}
+	if m.fromFile != "" {
+		cmds = append(cmds, loadPreviewCmd(m.fromFile))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
@@ -309,28 +347,29 @@ func (m NoteFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = min(minWidth, msg.Width)
+		inputWidth := max(20, m.width-20)
 		for i := range m.inputs {
-			m.inputs[i].SetWidth(msg.Width - 20)
+			m.inputs[i].SetWidth(inputWidth)
 		}
-		m.bodyInput.SetWidth(msg.Width - 20)
+		m.bodyInput.SetWidth(inputWidth)
 		m.bodyInput.SetHeight(minHeight)
 
 	case tea.BackgroundColorMsg:
 		m.bodyInput.SetStyles(textarea.DefaultStyles(msg.IsDark()))
 
-	case formCreatedMsg:
+	case createResult:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
 		m.createdPath = msg.path
 		return m, tea.Quit
 
-	case formErrorMsg:
-		m.err = msg.err
+	case filePreviewLoadedMsg:
+		m.filePreview = msg.preview
 		return m, nil
 
 	case submitMsg:
-		if !m.canSubmit() {
-			m.err = fmt.Errorf("filename, synopsis, and source are required")
-			return m, nil
-		}
 		return m, m.createCmd()
 
 	case tea.KeyPressMsg:
@@ -340,24 +379,12 @@ func (m NoteFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, m.keys.Tab):
-			m.focusIndex++
-			if m.focusIndex > m.lastIndex() {
-				m.focusIndex = 0
-			}
-			if !m.hasBodyField() && m.focusIndex == m.bodyIndex() {
-				m.focusIndex++
-			}
+			m = m.advanceFocus(+1)
 			m, cmd := m.updateFocus()
 			return m, cmd
 
 		case key.Matches(msg, m.keys.ShiftTab):
-			m.focusIndex--
-			if m.focusIndex < 0 {
-				m.focusIndex = m.lastIndex()
-			}
-			if !m.hasBodyField() && m.focusIndex == m.bodyIndex() {
-				m.focusIndex--
-			}
+			m = m.advanceFocus(-1)
 			m, cmd := m.updateFocus()
 			return m, cmd
 
@@ -365,36 +392,24 @@ func (m NoteFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitCmd()
 
 		case key.Matches(msg, m.keys.Enter):
-			if !m.hasBodyField() || m.focusIndex != m.bodyIndex() {
-				if m.focusIndex == m.submitIndex() || m.focusIndex == m.categoryIndex() {
+			if m.currentField() != fieldBody {
+				if m.currentField() == fieldSubmit || m.currentField() == fieldCategory {
 					return m, m.submitCmd()
 				}
-				m.focusIndex++
-				if m.focusIndex > m.lastIndex() {
-					m.focusIndex = 0
-				}
-				if !m.hasBodyField() && m.focusIndex == m.bodyIndex() {
-					m.focusIndex++
-				}
+				m = m.advanceFocus(+1)
 				m, cmd := m.updateFocus()
 				return m, cmd
 			}
 
 		case key.Matches(msg, m.keys.CatLeft):
-			if m.focusIndex == m.categoryIndex() {
-				m.categoryIdx--
-				if m.categoryIdx < 0 {
-					m.categoryIdx = len(m.cfg.Categories) - 1
-				}
+			if m.currentField() == fieldCategory {
+				m.categoryIdx = cycleIndex(m.categoryIdx, -1, len(m.cfg.Categories))
 				return m, nil
 			}
 
 		case key.Matches(msg, m.keys.CatRight):
-			if m.focusIndex == m.categoryIndex() {
-				m.categoryIdx++
-				if m.categoryIdx >= len(m.cfg.Categories) {
-					m.categoryIdx = 0
-				}
+			if m.currentField() == fieldCategory {
+				m.categoryIdx = cycleIndex(m.categoryIdx, +1, len(m.cfg.Categories))
 				return m, nil
 			}
 		}
@@ -416,22 +431,7 @@ func (m NoteFormModel) View() tea.View {
 	// Category tabs. The selected category is always highlighted so users
 	// know which category the note will be parked in. When the category area
 	// itself is focused, the selected tab is rendered with a visible indicator.
-	var renderedTabs []string
-	for i, cl := range m.cfg.Categories {
-		style := s.inactiveTab
-		label := cl.Name
-		if i == m.categoryIdx {
-			style = s.activeTab
-			if m.focusIndex == m.categoryIndex() {
-				label = "❯ " + cl.Name + " ❮"
-			}
-		}
-		renderedTabs = append(renderedTabs, style.Render(label))
-	}
-	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
-	gapWidth := max(0, m.width-lipgloss.Width(row))
-	gap := s.topBorder.Render(strings.Repeat(" ", gapWidth))
-	header := lipgloss.JoinHorizontal(lipgloss.Bottom, row, gap)
+	header := s.renderTabs(m.cfg.Categories, m.categoryIdx, m.width, m.currentField() == fieldCategory)
 	b.WriteString(header)
 	b.WriteString("\n\n")
 
@@ -463,8 +463,6 @@ func (m NoteFormModel) View() tea.View {
 
 	// Help / error.
 	help := "tab/shift+tab: move  ·  ←/→: change category  ·  enter: next/submit  ·  esc: cancel"
-	// b.WriteString(s.helpText.Render(help))
-
 	b.WriteString(s.window.Width(m.width).Render(s.helpText.Render(help)))
 
 	if m.err != nil {
@@ -478,8 +476,9 @@ func (m NoteFormModel) View() tea.View {
 }
 
 func (m NoteFormModel) renderSubmitButton() string {
-	label := "󰄽 Submit 󰄾"
-	if m.focusIndex == m.submitIndex() {
+	glyphs := theme.CurrentGlyphs()
+	label := fmt.Sprintf("%sSubmit%s", glyphs.SubmitLeft, glyphs.SubmitRight)
+	if m.currentField() == fieldSubmit {
 		return m.styles.submitButtonFocus.Render(label)
 	}
 	return m.styles.submitButton.Render(label)

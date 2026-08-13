@@ -149,6 +149,23 @@ func TestCreate(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate slug returns error", func(t *testing.T) {
+		_, err := Create(cfg, Draft{
+			Filename: "Duplicate",
+			Metadata: Metadata{Synopsis: "first", Source: "test", Category: "inbox"},
+		})
+		if err != nil {
+			t.Fatalf("first create: %v", err)
+		}
+		_, err = Create(cfg, Draft{
+			Filename: "Duplicate",
+			Metadata: Metadata{Synopsis: "second", Source: "test", Category: "inbox"},
+		})
+		if err == nil {
+			t.Fatal("expected error for duplicate slug")
+		}
+	})
+
 }
 
 func TestCreateFromFile(t *testing.T) {
@@ -431,6 +448,31 @@ func TestAdd(t *testing.T) {
 		_, err := Add(cfg, d)
 		if err == nil {
 			t.Fatal("expected error for incomplete frontmatter")
+		}
+	})
+
+	t.Run("body with incomplete frontmatter and CLI metadata creates directly", func(t *testing.T) {
+		d := Draft{
+			Filename: "merged",
+			Body:     "---\ncategory: inbox\n---\n\n# Title\n\nbody\n",
+			Metadata: Metadata{Synopsis: "cli synopsis", Source: "cli"},
+		}
+		out, err := Add(cfg, d)
+		if err != nil {
+			t.Fatalf("Add() error = %v", err)
+		}
+		if out.Form != nil {
+			t.Fatal("expected direct creation, got form")
+		}
+		got, err := Parse(out.Path)
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+		if got.Category != "inbox" || got.Source != "cli" || got.Synopsis != "cli synopsis" {
+			t.Errorf("frontmatter mismatch: %+v", got.Metadata)
+		}
+		if strings.Contains(got.Body, "category:") {
+			t.Errorf("body still contains frontmatter")
 		}
 	})
 

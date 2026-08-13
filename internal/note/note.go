@@ -144,11 +144,14 @@ func Parse(path string) (Note, error) {
 }
 
 // ParseString parses the leading `---` delimited block from a markdown string
-// and returns the parsed note plus a flag indicating whether a frontmatter
-// block was found. Unknown frontmatter keys are ignored.
-func ParseString(content string) (Note, bool) {
-	n, found, _ := parse(newStringScanner(content))
-	return n, found
+// and returns the parsed note, a flag indicating whether a frontmatter block
+// was found, and any parse error. Unknown frontmatter keys are ignored.
+func ParseString(content string) (Note, bool, error) {
+	n, found, err := parse(newStringScanner(content))
+	if err != nil {
+		return n, found, fmt.Errorf("parse string: %w", err)
+	}
+	return n, found, nil
 }
 
 func newScanner(f *os.File) *bufio.Scanner { return bufio.NewScanner(f) }
@@ -302,10 +305,11 @@ func Add(cfg *config.Config, d Draft) (Result, error) {
 			return Result{}, err
 		}
 	} else if d.Body != "" {
-		if parsed, hasFM := ParseString(d.Body); hasFM {
-			if missing := parsed.MissingFields(); len(missing) > 0 {
-				return Result{}, fmt.Errorf("incomplete frontmatter: missing %s", strings.Join(missing, ", "))
-			}
+		parsed, hasFM, err := ParseString(d.Body)
+		if err != nil {
+			return Result{}, err
+		}
+		if hasFM {
 			if d.Category == "" {
 				d.Category = parsed.Category
 			}
@@ -314,6 +318,19 @@ func Add(cfg *config.Config, d Draft) (Result, error) {
 			}
 			if d.Synopsis == "" {
 				d.Synopsis = parsed.Synopsis
+			}
+			var missing []string
+			if d.Category == "" {
+				missing = append(missing, "category")
+			}
+			if d.Source == "" {
+				missing = append(missing, "source")
+			}
+			if d.Synopsis == "" {
+				missing = append(missing, "synopsis")
+			}
+			if len(missing) > 0 {
+				return Result{}, fmt.Errorf("incomplete frontmatter: missing %s", strings.Join(missing, ", "))
 			}
 			d.Body = parsed.Body
 		}
@@ -358,13 +375,19 @@ func Create(cfg *config.Config, d Draft) (string, error) {
 
 	cl, ok := cfg.CategoryByName(d.Category)
 	if !ok {
-		return "", fmt.Errorf("unknown category %q — valid: %s", d.Category, strings.Join(cfg.CategoryNames(), ", "))
+		return "", fmt.Errorf("unknown category %q; valid: %s", d.Category, strings.Join(cfg.CategoryNames(), ", "))
 	}
 
 	path := filepath.Join(cl.Path, d.Slug()+".md")
 
 	if _, err := os.Stat(cl.Path); os.IsNotExist(err) {
 		return "", fmt.Errorf("category folder %q does not exist; run `park init` to create it", cl.Path)
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		return "", fmt.Errorf("note already exists: %s", path)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("check note path %q: %w", path, err)
 	}
 
 	n := Note{

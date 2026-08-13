@@ -12,6 +12,7 @@ import (
 	"github.com/polymorcodeus/park/internal/config"
 	"github.com/polymorcodeus/park/internal/fs"
 	"github.com/polymorcodeus/park/internal/note"
+	"github.com/polymorcodeus/park/internal/theme"
 )
 
 const maxFilePreviewLines = 6
@@ -462,8 +463,6 @@ func (m NoteFormModel) View() tea.View {
 
 	// Help / error.
 	help := "tab/shift+tab: move  ·  ←/→: change category  ·  enter: next/submit  ·  esc: cancel"
-	// b.WriteString(s.helpText.Render(help))
-
 	b.WriteString(s.window.Width(m.width).Render(s.helpText.Render(help)))
 
 	if m.err != nil {
@@ -477,7 +476,8 @@ func (m NoteFormModel) View() tea.View {
 }
 
 func (m NoteFormModel) renderSubmitButton() string {
-	label := "󰄽 Submit 󰄾"
+	glyphs := theme.CurrentGlyphs()
+	label := fmt.Sprintf("%sSubmit%s", glyphs.SubmitLeft, glyphs.SubmitRight)
 	if m.currentField() == fieldSubmit {
 		return m.styles.submitButtonFocus.Render(label)
 	}

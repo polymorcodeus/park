@@ -140,7 +140,16 @@ func (c Config) Dump() (string, error) {
 
 // DefaultConfigPath returns the default path to the park configuration file.
 func DefaultConfigPath() string {
-	return filepath.Join(DefaultRootPath(), "config")
+	return DefaultConfigPathFor(DefaultRootPath())
+}
+
+// DefaultConfigPathFor returns the default configuration path under the given
+// root. An empty root falls back to DefaultRootPath().
+func DefaultConfigPathFor(root string) string {
+	if root == "" {
+		root = DefaultRootPath()
+	}
+	return filepath.Join(root, "config")
 }
 
 // DefaultRootPath returns the park root directory.

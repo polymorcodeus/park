@@ -47,6 +47,11 @@ func Main() {
 		newCategory          string
 	)
 
+	defaultRoot := os.Getenv("PARK_ROOT")
+	if defaultRoot == "" {
+		defaultRoot = config.DefaultRootPath()
+	}
+
 	cmd := &cli.Command{
 		Name:                  "park",
 		Usage:                 "IPAA: a parking lot for markdown notes (Inbox/Projects/Areas/Archive)",
@@ -60,14 +65,14 @@ func Main() {
 			&cli.StringFlag{
 				Name:        "park-root",
 				Destination: &parkRoot,
-				Value:       config.DefaultRootPath(),
+				Value:       defaultRoot,
 				Sources:     cli.EnvVars("PARK_ROOT"),
 				Usage:       "root directory for parked notes",
 			},
 			&cli.StringFlag{
 				Name:        "park-config",
 				Destination: &parkConfig,
-				Value:       config.DefaultConfigPath(),
+				Value:       config.DefaultConfigPathFor(defaultRoot),
 				Sources:     cli.EnvVars("PARK_CONFIG"),
 				Usage:       "path to the config file",
 			},
@@ -205,7 +210,7 @@ func Main() {
 						return ctx, styledExit(fmt.Errorf("usage: park reclassify <file> --category <category>"), 2)
 					}
 					if !cfg.HasCategory(reclassifyCategory) {
-						return ctx, styledExit(fmt.Errorf("unknown category %q — valid: %s", reclassifyCategory, strings.Join(cfg.CategoryNames(), ", ")), 2)
+						return ctx, styledExit(fmt.Errorf("unknown category %q; valid: %s", reclassifyCategory, strings.Join(cfg.CategoryNames(), ", ")), 2)
 					}
 					return ctx, nil
 				},
@@ -227,7 +232,11 @@ func Main() {
 					return ctx, nil
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					if err := render.ShowFile(store.ResolvePath(cfg, cmd.Args().First()), cmd.Root().Writer); err != nil {
+					path, err := store.ResolvePath(cfg, cmd.Args().First())
+					if err != nil {
+						return styledExit(err, 1)
+					}
+					if err := render.ShowFile(path, cmd.Root().Writer); err != nil {
 						return styledExit(err, 1)
 					}
 					return nil
@@ -248,8 +257,6 @@ func styledExit(err error, code int) error {
 	return cli.Exit(styledError(err), code)
 }
 
-const errorBullet string = "󰯷" // "nf-md-alpha_e_box_outline
-
 // StyledError returns a user-facing error string, styled when stdout is a
 // terminal.
 func styledError(e error) string {
@@ -265,7 +272,7 @@ func styledError(e error) string {
 		Render("HEAVENS TO MURGATROYD!")
 	body := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(theme.CharmRed)).
-		Render(errorBullet, e.Error())
+		Render(theme.CurrentGlyphs().ErrorBullet, e.Error())
 	return header + "\n" + body
 }
 

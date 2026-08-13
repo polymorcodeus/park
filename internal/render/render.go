@@ -31,7 +31,7 @@ func termRenderer() (*glamour.TermRenderer, error) {
 }
 
 // ShowFile renders a parked note's frontmatter summary + body to w via
-// glamour — the "look deeper" step after the synopsis in the list view
+// glamour: the "look deeper" step after the synopsis in the list view
 // earned a second look.
 func ShowFile(path string, w io.Writer) error {
 	n, err := note.Parse(path)
@@ -53,6 +53,8 @@ func ShowFile(path string, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("render %q: %w", path, err)
 	}
-	_, err = fmt.Fprint(w, out)
-	return err
+	if _, err := fmt.Fprint(w, out); err != nil {
+		return fmt.Errorf("write rendered output: %w", err)
+	}
+	return nil
 }

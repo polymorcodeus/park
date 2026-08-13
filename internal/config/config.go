@@ -137,7 +137,6 @@ func (c Config) Dump() (string, error) {
 	return b.String(), nil
 }
 
-
 // DefaultConfigPath returns the default path to the park configuration file.
 func DefaultConfigPath() string {
 	return DefaultConfigPathFor(DefaultRootPath())

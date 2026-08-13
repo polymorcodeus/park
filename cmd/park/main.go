@@ -275,4 +275,3 @@ func styledError(e error) string {
 		Render(theme.CurrentGlyphs().ErrorBullet, e.Error())
 	return header + "\n" + body
 }
-

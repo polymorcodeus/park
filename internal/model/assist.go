@@ -189,7 +189,7 @@ type reclassifyResult struct {
 	err  error
 }
 
-func (m *AssistModel) loadItemsCmd() tea.Cmd {
+func (m AssistModel) loadItemsCmd() tea.Cmd {
 	categoryName := m.cfg.Categories[m.categoryIdx].Name
 	cfg := m.cfg
 	return func() tea.Msg {
@@ -205,7 +205,7 @@ func (m *AssistModel) loadItemsCmd() tea.Cmd {
 	}
 }
 
-func (m *AssistModel) reclassifyCmd(targetCategory string) tea.Cmd {
+func (m AssistModel) reclassifyCmd(targetCategory string) tea.Cmd {
 	it, ok := m.list.SelectedItem().(listItem)
 	if !ok {
 		return func() tea.Msg {

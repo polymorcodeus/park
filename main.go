@@ -1,5 +1,5 @@
 // Command park is a standalone parking-lot for markdown notes, organized
-// as IPAA — Inbox / Projects / Areas / Archive, a PARA variant.
+// as IPAA: Inbox / Projects / Areas / Archive, a PARA variant.
 
 package main
 

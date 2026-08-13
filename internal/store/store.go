@@ -69,7 +69,7 @@ func Check(cfg *config.Config) ([]string, error) {
 func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 	cl, ok := cfg.CategoryByName(categoryName)
 	if !ok {
-		return nil, fmt.Errorf("unknown category %q — valid: %s", categoryName, strings.Join(cfg.CategoryNames(), ", "))
+		return nil, fmt.Errorf("unknown category %q; valid: %s", categoryName, strings.Join(cfg.CategoryNames(), ", "))
 	}
 
 	entries, err := os.ReadDir(cl.Path)
@@ -113,7 +113,7 @@ func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 func Reclassify(cfg *config.Config, filename string, targetCategory string) error {
 	cl, ok := cfg.CategoryByName(targetCategory)
 	if !ok {
-		return fmt.Errorf("unknown category %q — valid: %s", targetCategory, strings.Join(cfg.CategoryNames(), ", "))
+		return fmt.Errorf("unknown category %q; valid: %s", targetCategory, strings.Join(cfg.CategoryNames(), ", "))
 	}
 
 	var src string
@@ -141,7 +141,13 @@ func Reclassify(cfg *config.Config, filename string, targetCategory string) erro
 	n.Category = targetCategory
 	dst := filepath.Join(cl.Path, filename)
 
-	// Rewrite frontmatter in place first, then move — if the move fails
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("already exists in %s: %s", targetCategory, filename)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("check destination %q: %w", dst, err)
+	}
+
+	// Rewrite frontmatter in place first, then move; if the move fails
 	// (e.g. cross-device), the file is still left in a consistent state.
 	if err := note.Write(src, n); err != nil {
 		return fmt.Errorf("rewrite frontmatter for %q: %w", src, err)
@@ -166,16 +172,17 @@ func FormatInitResult(created, existed []string) string {
 }
 
 // ResolvePath accepts either a bare filename (searched across all category
-// folders) or a full path used as-is.
-func ResolvePath(cfg *config.Config, filename string) string {
+// folders) or a full path used as-is. It returns os.ErrNotExist when no file
+// can be resolved.
+func ResolvePath(cfg *config.Config, filename string) (string, error) {
 	if _, err := os.Stat(filename); err == nil {
-		return filename
+		return filename, nil
 	}
 	for _, cl := range cfg.Categories {
 		p := filepath.Join(cl.Path, filename)
 		if _, err := os.Stat(p); err == nil {
-			return p
+			return p, nil
 		}
 	}
-	return filename
+	return "", os.ErrNotExist
 }

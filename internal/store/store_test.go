@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -208,6 +209,26 @@ func TestReclassifyMissingFile(t *testing.T) {
 	}
 }
 
+func TestReclassifyDestinationExists(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+	if _, _, err := Init(cfg); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	if _, err := note.Create(cfg, note.Draft{Filename: "Collision", Metadata: note.Metadata{Synopsis: "in inbox", Source: "test", Category: "inbox"}}); err != nil {
+		t.Fatalf("Create() inbox error = %v", err)
+	}
+	if _, err := note.Create(cfg, note.Draft{Filename: "Collision", Metadata: note.Metadata{Synopsis: "in projects", Source: "test", Category: "projects"}}); err != nil {
+		t.Fatalf("Create() projects error = %v", err)
+	}
+
+	err := Reclassify(cfg, "Collision.md", "projects")
+	if err == nil {
+		t.Fatal("expected error when destination file already exists")
+	}
+}
+
 func TestScan(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
@@ -254,13 +275,24 @@ func TestResolvePath(t *testing.T) {
 	}
 	filename := filepath.Base(path)
 
-	got := ResolvePath(cfg, filename)
+	got, err := ResolvePath(cfg, filename)
+	if err != nil {
+		t.Fatalf("ResolvePath(%q) error = %v", filename, err)
+	}
 	if got != path {
 		t.Errorf("ResolvePath(%q) = %q, want %q", filename, got, path)
 	}
 
-	fullPath := ResolvePath(cfg, path)
+	fullPath, err := ResolvePath(cfg, path)
+	if err != nil {
+		t.Fatalf("ResolvePath(%q) error = %v", path, err)
+	}
 	if fullPath != path {
 		t.Errorf("ResolvePath(%q) = %q, want %q", path, fullPath, path)
+	}
+
+	_, err = ResolvePath(cfg, "missing.md")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ResolvePath(missing) error = %v, want os.ErrNotExist", err)
 	}
 }

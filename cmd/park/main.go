@@ -45,6 +45,7 @@ func Main() {
 		parkRoot, parkConfig string
 		reclassifyCategory   string
 		newCategory          string
+		schemaJSON           bool
 	)
 
 	defaultRoot := os.Getenv("PARK_ROOT")
@@ -216,6 +217,23 @@ func Main() {
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					if err := store.Reclassify(cfg, cmd.Args().First(), reclassifyCategory); err != nil {
+						return styledExit(err, 1)
+					}
+					return nil
+				},
+			},
+			{
+				Name:  "schema",
+				Usage: "print the frontmatter schema contract",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:        "json",
+						Destination: &schemaJSON,
+						Usage:       "output machine-readable JSON",
+					},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					if err := schemaPark(schemaJSON, cmd.Root().Writer); err != nil {
 						return styledExit(err, 1)
 					}
 					return nil

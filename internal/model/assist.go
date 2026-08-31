@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/polymorcodeus/park/internal/config"
 	"github.com/polymorcodeus/park/internal/store"
+	"github.com/polymorcodeus/park/schema"
 )
 
 // listItem adapts an Item to bubbles/list's list.Item interface.
@@ -19,7 +20,7 @@ type listItem struct {
 }
 
 func (i listItem) Title() string {
-	created, _ := time.Parse("2006-01-02", i.item.Created)
+	created, _ := time.Parse(schema.DateFormat, i.item.Created)
 	if created.IsZero() {
 		created = i.item.ModTime
 	}

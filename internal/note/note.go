@@ -12,38 +12,12 @@ import (
 
 	"github.com/polymorcodeus/park/internal/config"
 	"github.com/polymorcodeus/park/internal/fs"
+	"github.com/polymorcodeus/park/schema"
 )
 
-// Metadata is the set of fields persisted as frontmatter in every note.
-type Metadata struct {
-	Category string
-	Created  string
-	Source   string
-	Synopsis string
-}
-
-// IsComplete reports whether all metadata fields are populated.
-func (m Metadata) IsComplete() bool {
-	return fieldSet(m.Category) && fieldSet(m.Created) && fieldSet(m.Source) && fieldSet(m.Synopsis)
-}
-
-// MissingFields returns the metadata fields that are empty.
-func (m Metadata) MissingFields() []string {
-	var missing []string
-	if !fieldSet(m.Category) {
-		missing = append(missing, "category")
-	}
-	if !fieldSet(m.Created) {
-		missing = append(missing, "created")
-	}
-	if !fieldSet(m.Source) {
-		missing = append(missing, "source")
-	}
-	if !fieldSet(m.Synopsis) {
-		missing = append(missing, "synopsis")
-	}
-	return missing
-}
+// Metadata is the shared metadata block for parked notes. It is an alias
+// so the canonical contract lives in one place: the public schema package.
+type Metadata = schema.Frontmatter
 
 // Note is the persisted representation of a parked note. Path is empty when
 // the note is parsed from a string rather than read from a file.
@@ -242,8 +216,7 @@ func Write(path string, n Note) (err error) {
 		}
 	}()
 
-	if _, err = fmt.Fprintf(f, "---\ncategory: %s\ncreated: %s\nsource: %s\nsynopsis: %s\n---\n\n%s\n",
-		n.Category, n.Created, n.Source, n.Synopsis, n.Body); err != nil {
+	if _, err = fmt.Fprint(f, schema.Render(n.Metadata, n.Body)); err != nil {
 		return fmt.Errorf("write temp %q: %w", tmpPath, err)
 	}
 
@@ -255,7 +228,7 @@ func Write(path string, n Note) (err error) {
 
 // Today returns the current date in the frontmatter's date format.
 func Today() string {
-	return time.Now().Format("2006-01-02")
+	return time.Now().Format(schema.DateFormat)
 }
 
 // Result is the outcome of attempting to add a note headlessly.
@@ -393,7 +366,7 @@ func Create(cfg *config.Config, d Draft) (string, error) {
 	n := Note{
 		Path: path,
 		Body: d.Body,
-		Metadata: Metadata{
+		Metadata: schema.Frontmatter{
 			Category: d.Category,
 			Created:  Today(),
 			Source:   d.Source,

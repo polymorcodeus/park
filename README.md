@@ -94,6 +94,17 @@ Frontmatter is parsed line-by-line — no YAML dependency. Four fields:
 
 `synopsis` is the key design decision: read it, decide whether to open the file, move on. `source` lets future-you reconstruct *why* a note exists without re-reading it.
 
+### Schema contract
+
+The frontmatter contract is published as a public, stdlib-only Go package at `github.com/polymorcodeus/park/schema` and exposed through the CLI:
+
+```bash
+park schema        # human-readable contract
+park schema --json # machine-readable contract for downstream tooling
+```
+
+The JSON output includes the canonical category enum, field kinds, the date format, and the exact write template. Import the package directly when building tools that write or validate park notes.
+
 ### Reclassification
 
 `park reclassify <file> -c <category>` rewrites frontmatter *before* moving the file. A failed move never leaves a note in a half-updated state. Same-category moves are rejected.
@@ -109,6 +120,8 @@ Frontmatter is parsed line-by-line — no YAML dependency. Four fields:
 | `show <file>` | glamour-render a note, no TUI |
 | `reclassify <file> -c <cat>` | reclassify a note (alias `recat`) |
 | `config` | print the default TOML config |
+| `schema` | print the frontmatter schema contract |
+| `schema --json` | print the contract as machine-readable JSON |
 
 ### `park new` options
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/polymorcodeus/park/internal/fs"
+	"github.com/polymorcodeus/park/schema"
 )
 
 // Config is the top-level configuration for park.
@@ -189,12 +190,12 @@ func DefaultConfig(root string) *Config {
 		root = DefaultRootPath()
 	}
 	return &Config{
-		DefaultCategory: "inbox",
+		DefaultCategory: string(schema.CategoryInbox),
 		Categories: []Category{
-			{Name: "inbox", Path: filepath.Join(root, "_inbox"), Key: "i"},
-			{Name: "projects", Path: filepath.Join(root, "_projects"), Key: "p"},
-			{Name: "areas", Path: filepath.Join(root, "_areas"), Key: "a"},
-			{Name: "archive", Path: filepath.Join(root, "_archive"), Key: "x"},
+			{Name: string(schema.CategoryInbox), Path: filepath.Join(root, "_inbox"), Key: "i"},
+			{Name: string(schema.CategoryProjects), Path: filepath.Join(root, "_projects"), Key: "p"},
+			{Name: string(schema.CategoryAreas), Path: filepath.Join(root, "_areas"), Key: "a"},
+			{Name: string(schema.CategoryArchive), Path: filepath.Join(root, "_archive"), Key: "x"},
 		},
 	}
 }

@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
+
+	"github.com/polymorcodeus/park/schema"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/urfave/cli/v3"
@@ -100,6 +104,49 @@ func runNoteForm(cfg *config.Config, w io.Writer, seed *note.Draft) error {
 	}
 	if res.Path != "" {
 		return printParked(w, res.Path)
+	}
+	return nil
+}
+
+// schemaPark prints the canonical frontmatter schema, either as JSON or as
+// a short human-readable summary.
+func schemaPark(asJSON bool, w io.Writer) error {
+	if asJSON {
+		data, err := json.MarshalIndent(schema.Describe(), "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal schema: %w", err)
+		}
+		if _, err := fmt.Fprintln(w, string(data)); err != nil {
+			return fmt.Errorf("write schema output: %w", err)
+		}
+		return nil
+	}
+
+	s := schema.Describe()
+	var b strings.Builder
+	fmt.Fprintf(&b, "park frontmatter schema (version %d)\n\n", s.SchemaVersion)
+	fmt.Fprintln(&b, "Fields:")
+	for _, f := range s.Fields {
+		extra := ""
+		switch f.Kind {
+		case "enum":
+			extra = "values: " + strings.Join(f.Values, ", ")
+		case "date":
+			extra = "format: " + f.Format
+			if f.Auto {
+				extra += " (auto-stamped)"
+			}
+		}
+		if extra != "" {
+			fmt.Fprintf(&b, "  %-8s  required %-5s  %s\n", f.Name, f.Kind, extra)
+		} else {
+			fmt.Fprintf(&b, "  %-8s  required %-5s\n", f.Name, f.Kind)
+		}
+	}
+	fmt.Fprintf(&b, "\nDate format: %s\n", s.DateFormat)
+	fmt.Fprintf(&b, "Write template:\n%s", s.WriteTemplate)
+	if _, err := fmt.Fprint(w, b.String()); err != nil {
+		return fmt.Errorf("write schema output: %w", err)
 	}
 	return nil
 }

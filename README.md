@@ -27,6 +27,14 @@ park reclassify 1767786622-idea.md -c projects
 
 ## Install
 
+Quick install (downloads the latest release to `/usr/local/bin`):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/polymorcodeus/park/main/install.sh | bash
+```
+
+Or install via Go:
+
 ```bash
 go install github.com/polymorcodeus/park@latest
 ```

@@ -39,6 +39,15 @@ func buildVersion() string {
 }
 
 func Main() {
+	if err := newCommand().Run(context.Background(), os.Args); err != nil {
+		fmt.Fprintln(os.Stderr, styledError(err))
+		os.Exit(1)
+	}
+}
+
+// newCommand builds the park CLI command tree. It is extracted from Main so
+// tests can drive dispatch without touching os.Args or process exit.
+func newCommand() *cli.Command {
 	var cfg *config.Config
 
 	var (
@@ -53,7 +62,7 @@ func Main() {
 		defaultRoot = config.DefaultRootPath()
 	}
 
-	cmd := &cli.Command{
+	return &cli.Command{
 		Name:                  "park",
 		Usage:                 "IPAA: a parking lot for markdown notes (Inbox/Projects/Areas/Archive)",
 		Version:               buildVersion(),
@@ -263,10 +272,6 @@ func Main() {
 		},
 	}
 
-	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		fmt.Fprintln(os.Stderr, styledError(err))
-		os.Exit(1)
-	}
 }
 
 // styledExit wraps an error in the configured styled output and returns a

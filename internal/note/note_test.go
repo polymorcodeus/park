@@ -525,6 +525,76 @@ func TestAdd(t *testing.T) {
 			t.Errorf("form source = %q, want migration", out.Form.Source)
 		}
 	})
+
+	t.Run("stdin body without frontmatter and missing metadata returns form with body", func(t *testing.T) {
+		body := "# Piped Body\n\ntext\n"
+		d := Draft{Body: body}
+		out, err := Add(cfg, d)
+		if err != nil {
+			t.Fatalf("Add() error = %v", err)
+		}
+		if out.Form == nil {
+			t.Fatal("expected form outcome")
+		}
+		if out.Form.Body != body {
+			t.Errorf("form body = %q, want %q", out.Form.Body, body)
+		}
+		if out.Form.Category != "inbox" {
+			t.Errorf("form category = %q, want inbox", out.Form.Category)
+		}
+		if out.Form.Filename != "Piped Body" {
+			t.Errorf("form filename = %q, want %q", out.Form.Filename, "Piped Body")
+		}
+	})
+
+	t.Run("body with H1 and no filename derives filename", func(t *testing.T) {
+		d := Draft{
+			Body:     "# Derived Title\n\nbody\n",
+			Metadata: Metadata{Synopsis: "h1 derived", Source: "stdin", Category: "inbox"},
+		}
+		out, err := Add(cfg, d)
+		if err != nil {
+			t.Fatalf("Add() error = %v", err)
+		}
+		if out.Form != nil {
+			t.Fatal("expected direct creation, got form")
+		}
+		if !strings.HasSuffix(out.Path, "derived-title.md") {
+			t.Errorf("path = %q, expected suffix derived-title.md", out.Path)
+		}
+	})
+
+	t.Run("body without H1 and no filename returns error", func(t *testing.T) {
+		d := Draft{
+			Body:     "just text without a heading\n",
+			Metadata: Metadata{Synopsis: "no h1", Source: "stdin", Category: "inbox"},
+		}
+		_, err := Add(cfg, d)
+		if err == nil {
+			t.Fatal("expected error when no filename and no H1")
+		}
+	})
+
+	t.Run("body with frontmatter and explicit category flag overrides category", func(t *testing.T) {
+		d := Draft{
+			Body:     "---\ncategory: areas\nsource: chat\nsynopsis: fm-driven\ncreated: 2026-07-01\n---\n\n# Title\n\nbody\n",
+			Metadata: Metadata{Category: "archive"},
+		}
+		out, err := Add(cfg, d)
+		if err != nil {
+			t.Fatalf("Add() error = %v", err)
+		}
+		if out.Form != nil {
+			t.Fatal("expected direct creation, got form")
+		}
+		got, err := Parse(out.Path)
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+		if got.Category != "archive" || got.Source != "chat" || got.Synopsis != "fm-driven" {
+			t.Errorf("frontmatter mismatch: %+v", got.Metadata)
+		}
+	})
 }
 
 func TestSlugify(t *testing.T) {

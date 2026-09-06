@@ -165,6 +165,63 @@ func TestNoteFormModelCategoryNavigation(t *testing.T) {
 	}
 }
 
+func TestNoteFormModelCancelKeys(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	m, err := NewNoteFormModel(cfg, note.Draft{Metadata: note.Metadata{Category: "inbox"}})
+	if err != nil {
+		t.Fatalf("NewNoteFormModel() error = %v", err)
+	}
+
+	cancelKeys := []tea.KeyPressMsg{
+		{Code: tea.KeyEsc},
+		{Code: 'c', Mod: tea.ModCtrl},
+	}
+	for _, k := range cancelKeys {
+		updated, cmd := m.Update(k)
+		if _, ok := updated.(NoteFormModel); !ok {
+			t.Fatalf("unexpected model type for %v", k)
+		}
+		if cmd == nil {
+			t.Fatalf("expected quit command for %v", k)
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("expected QuitMsg for %v, got %T", k, cmd())
+		}
+	}
+}
+
+func TestNoteFormModelCategoryKeyBindings(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+
+	tests := []struct {
+		name string
+		key  tea.KeyPressMsg
+		want string
+	}{
+		{name: "left arrow", key: tea.KeyPressMsg{Code: tea.KeyLeft}, want: "archive"},
+		{name: "h", key: keyPress('h'), want: "archive"},
+		{name: "right arrow", key: tea.KeyPressMsg{Code: tea.KeyRight}, want: "projects"},
+		{name: "l", key: keyPress('l'), want: "projects"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := NewNoteFormModel(cfg, note.Draft{Metadata: note.Metadata{Category: "inbox"}})
+			if err != nil {
+				t.Fatalf("NewNoteFormModel() error = %v", err)
+			}
+			m.focusIndex = fieldIndex(m, fieldCategory)
+			updated, _ := m.Update(tt.key)
+			final, ok := updated.(NoteFormModel)
+			if !ok {
+				t.Fatalf("unexpected model type")
+			}
+			if final.categoryName() != tt.want {
+				t.Errorf("category after %s = %q, want %q", tt.name, final.categoryName(), tt.want)
+			}
+		})
+	}
+}
+
 func TestNoteFormModelBodyCursorStartsAtTop(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	body := strings.Repeat("line\n", 20)

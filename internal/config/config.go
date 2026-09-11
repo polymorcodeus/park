@@ -177,11 +177,13 @@ func DefaultRootPath() string {
 }
 
 // Category defines a single category (inbox, project, area, archive, or
-// user-defined) with its storage path and TUI hotkey.
+// user-defined) with its storage path and TUI hotkey. Excluded categories are
+// omitted from `park list` by default and reappear with `--all`.
 type Category struct {
-	Name string `toml:"name"`
-	Path string `toml:"path"`
-	Key  string `toml:"key"`
+	Name     string `toml:"name"`
+	Path     string `toml:"path"`
+	Key      string `toml:"key"`
+	Excluded bool   `toml:"excluded,omitempty"`
 }
 
 // DefaultConfig returns the built-in IPAA default configuration.
@@ -195,7 +197,7 @@ func DefaultConfig(root string) *Config {
 			{Name: string(schema.CategoryInbox), Path: filepath.Join(root, "_inbox"), Key: "i"},
 			{Name: string(schema.CategoryProjects), Path: filepath.Join(root, "_projects"), Key: "p"},
 			{Name: string(schema.CategoryAreas), Path: filepath.Join(root, "_areas"), Key: "a"},
-			{Name: string(schema.CategoryArchive), Path: filepath.Join(root, "_archive"), Key: "x"},
+			{Name: string(schema.CategoryArchive), Path: filepath.Join(root, "_archive"), Key: "x", Excluded: true},
 		},
 	}
 }

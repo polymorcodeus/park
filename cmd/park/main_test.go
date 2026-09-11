@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/polymorcodeus/park/schema"
 	"github.com/urfave/cli/v3"
 )
 
@@ -150,5 +152,167 @@ func TestStyledExit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "boom") {
 		t.Errorf("error = %q, want boom message", err.Error())
+	}
+}
+
+// writeNote writes a minimal valid note into the given category folder.
+func writeNote(t *testing.T, dir, name, category, synopsis string) {
+	t.Helper()
+	content := "---\ncategory: " + category + "\ncreated: 2026-01-01\nsource: test\nsynopsis: " + synopsis + "\n---\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write note %q: %v", name, err)
+	}
+}
+
+func TestListCommandDefaultExcludesArchive(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_inbox"), "inbox-note.md", "inbox", "an inbox item")
+	writeNote(t, filepath.Join(root, "_archive"), "archive-note.md", "archive", "an archived item")
+
+	out, _, err := runPark(t, root, "list")
+	if err != nil {
+		t.Fatalf("list error = %v", err)
+	}
+	if !strings.Contains(out, "inbox-note.md") {
+		t.Errorf("list output missing inbox note:\n%s", out)
+	}
+	if strings.Contains(out, "archive-note.md") {
+		t.Errorf("list output included excluded archive:\n%s", out)
+	}
+}
+
+func TestListAllIncludesArchive(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_archive"), "archive-note.md", "archive", "an archived item")
+
+	out, _, err := runPark(t, root, "list", "--all")
+	if err != nil {
+		t.Fatalf("list --all error = %v", err)
+	}
+	if !strings.Contains(out, "archive-note.md") {
+		t.Errorf("list --all output missing archive note:\n%s", out)
+	}
+}
+
+func TestListCategoryOverridesExclusion(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_archive"), "archive-note.md", "archive", "an archived item")
+
+	out, _, err := runPark(t, root, "list", "--category", "archive")
+	if err != nil {
+		t.Fatalf("list --category error = %v", err)
+	}
+	if !strings.Contains(out, "archive-note.md") {
+		t.Errorf("list --category archive output missing archive note:\n%s", out)
+	}
+}
+
+func TestListCategoryUnknown(t *testing.T) {
+	_, _, err := runPark(t, t.TempDir(), "list", "--category", "bogus")
+	if err == nil {
+		t.Fatal("expected error for unknown category")
+	}
+	if got := exitCode(t, err); got != 2 {
+		t.Errorf("exit code = %d, want 2", got)
+	}
+}
+
+func TestListJSON(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_inbox"), "json-note.md", "inbox", "a json item")
+
+	out, _, err := runPark(t, root, "list", "--json")
+	if err != nil {
+		t.Fatalf("list --json error = %v", err)
+	}
+
+	var env struct {
+		SchemaVersion int `json:"schema_version"`
+		Items         []struct {
+			Filename string `json:"filename"`
+			Category string `json:"category"`
+			Synopsis string `json:"synopsis"`
+			Modified string `json:"modified"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("parse list json = %v\n%s", err, out)
+	}
+	if env.SchemaVersion != schema.SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", env.SchemaVersion, schema.SchemaVersion)
+	}
+	if len(env.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(env.Items))
+	}
+	if env.Items[0].Filename != "json-note.md" || env.Items[0].Category != "inbox" {
+		t.Errorf("item = %+v, want json-note.md in inbox", env.Items[0])
+	}
+	if env.Items[0].Synopsis != "a json item" {
+		t.Errorf("synopsis = %q, want %q", env.Items[0].Synopsis, "a json item")
+	}
+	if env.Items[0].Modified == "" {
+		t.Error("modified is empty, want a timestamp")
+	}
+}
+
+func TestListJSONCategoryFilter(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_inbox"), "inbox-note.md", "inbox", "an inbox item")
+	writeNote(t, filepath.Join(root, "_archive"), "archive-note.md", "archive", "an archived item")
+
+	out, _, err := runPark(t, root, "list", "--json", "--category", "archive")
+	if err != nil {
+		t.Fatalf("list --json --category error = %v", err)
+	}
+
+	var env struct {
+		SchemaVersion int `json:"schema_version"`
+		Items         []struct {
+			Filename string `json:"filename"`
+			Category string `json:"category"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("parse list json = %v\n%s", err, out)
+	}
+	if env.SchemaVersion != schema.SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", env.SchemaVersion, schema.SchemaVersion)
+	}
+	if len(env.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(env.Items))
+	}
+	if env.Items[0].Filename != "archive-note.md" || env.Items[0].Category != "archive" {
+		t.Errorf("item = %+v, want archive-note.md in archive", env.Items[0])
+	}
+}
+
+func TestListAlias(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_inbox"), "alias-note.md", "inbox", "an item")
+
+	out, _, err := runPark(t, root, "ls")
+	if err != nil {
+		t.Fatalf("ls error = %v", err)
+	}
+	if !strings.Contains(out, "alias-note.md") {
+		t.Errorf("ls output missing note:\n%s", out)
 	}
 }

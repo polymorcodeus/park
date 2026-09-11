@@ -16,6 +16,7 @@ import (
 	"github.com/polymorcodeus/park/internal/model"
 	"github.com/polymorcodeus/park/internal/note"
 	"github.com/polymorcodeus/park/internal/render"
+	"github.com/polymorcodeus/park/internal/store"
 )
 
 // isTerminal reports whether the given file descriptor is connected to an
@@ -149,6 +150,19 @@ func schemaPark(asJSON bool, w io.Writer) error {
 		return fmt.Errorf("write schema output: %w", err)
 	}
 	return nil
+}
+
+// listPark lists parked notes grouped by category, either as plain text or as
+// the versioned JSON envelope.
+func listPark(cfg *config.Config, opts store.ListOptions, asJSON bool, w io.Writer) error {
+	groups, err := store.List(cfg, opts)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return store.WriteListJSON(w, groups)
+	}
+	return store.FormatList(w, groups)
 }
 
 func assistPark(cfg *config.Config, w io.Writer) error {

@@ -21,6 +21,7 @@ park init
 park new "revisit dashboard caching approach" \
   -s "current TTL feels wrong, worth a spike" -src my-cli-tool
 park new "keep an eye on API rate limits" -c area
+park list
 park assist
 park reclassify 1767786622-idea.md -c projects
 ```
@@ -124,6 +125,7 @@ The JSON output includes the canonical category enum, field kinds, the date form
 | `init` | create the category folders (idempotent) |
 | `check` | verify category folders exist (useful for automation) |
 | `new [title]` | park a new note (alias `add`) |
+| `list [--all] [-c <cat>] [--json]` | list parked notes grouped by category (alias `ls`) |
 | `assist` | open the tabbed TUI browser |
 | `show <file>` | glamour-render a note, no TUI |
 | `reclassify <file> -c <cat>` | reclassify a note (alias `recat`) |
@@ -140,6 +142,57 @@ The JSON output includes the canonical category enum, field kinds, the date form
 | `-c, --category` | park directly into a specific category |
 | `-f, --from-file` | ingest an existing markdown file |
 | `--filename` | explicit file slug |
+
+### `park list` options
+
+| option | purpose |
+|--------|---------|
+| `--all` | include categories excluded by config (for example archive) |
+| `-c, --category` | only list these categories (repeatable; overrides exclusion) |
+| `--json` | emit a versioned, machine-readable envelope |
+
+`park list` renders one block per category: an upper-cased banner followed by each note's filename and frontmatter fields. Notes within a category are ordered oldest-modified first, and categories marked `excluded` in the config are hidden until `--all` is passed or the category is named explicitly with `-c`.
+
+```
+INBOX
+-----
+
+filename: ttl-spike.md
+category: inbox
+created: 2026-07-16
+source: terminal
+synopsis: current TTL feels wrong, worth a spike
+
+PROJECTS
+--------
+
+filename: caching.md
+category: projects
+created: 2026-07-18
+source: my-cli-tool
+synopsis: dashboard caching rework
+```
+
+`park list --json` flattens every group into a single `items` array, each item carrying its `category`, `path`, and RFC 3339 `modified` timestamp, wrapped in a versioned envelope:
+
+```json
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "filename": "ttl-spike.md",
+      "path": "/home/you/.config/park/_inbox/ttl-spike.md",
+      "category": "inbox",
+      "created": "2026-07-16",
+      "source": "terminal",
+      "synopsis": "current TTL feels wrong, worth a spike",
+      "modified": "2026-07-16T19:03:11Z"
+    }
+  ]
+}
+```
+
+`schema_version` tracks the frontmatter contract exposed by `park schema`, so consumers can detect drift.
 
 ### Ingestion
 
@@ -244,28 +297,31 @@ Config lives at `<park-root>/config` as TOML. Run `park config` to print the def
 ```toml
 default_category = "inbox"
 
-[[categories]]
+[[category]]
   name = "inbox"
   path = "~/.config/park/_inbox"
   key = "i"
 
-[[categories]]
+[[category]]
   name = "projects"
   path = "~/.config/park/_projects"
   key = "p"
 
-[[categories]]
+[[category]]
   name = "areas"
   path = "~/.config/park/_areas"
   key = "a"
 
-[[categories]]
+[[category]]
   name = "archive"
   path = "~/.config/park/_archive"
   key = "x"
+  excluded = true
 ```
 
 Categories are fully configurable: name, storage path, and TUI hotkey. Add or remove categories to match your workflow. `default_category` is where `park new` lands notes when `-c` is omitted.
+
+Set `excluded = true` on a category to hide it from `park list` by default; it reappears with `park list --all` or when named explicitly (`park list -c archive`). The built-in config ships with `archive` excluded.
 
 ## Tech stack
 

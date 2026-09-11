@@ -55,6 +55,8 @@ func newCommand() *cli.Command {
 		reclassifyCategory   string
 		newCategory          string
 		schemaJSON           bool
+		listJSON             bool
+		listAll              bool
 	)
 
 	defaultRoot := os.Getenv("PARK_ROOT")
@@ -149,6 +151,46 @@ func newCommand() *cli.Command {
 					msg := store.FormatInitResult(created, existed)
 					if _, err := fmt.Fprintln(cmd.Root().Writer, msg); err != nil {
 						return fmt.Errorf("write init output: %w", err)
+					}
+					return nil
+				},
+			},
+			{
+				Name:    "list",
+				Aliases: []string{"ls"},
+				Usage:   "list parked notes grouped by category",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:        "json",
+						Destination: &listJSON,
+						Usage:       "output machine-readable JSON",
+					},
+					&cli.BoolFlag{
+						Name:        "all",
+						Destination: &listAll,
+						Usage:       "include categories excluded by config",
+					},
+					&cli.StringSliceFlag{
+						Name:    "category",
+						Aliases: []string{"c"},
+						Usage:   "only list these categories (repeatable; overrides exclusion)",
+					},
+				},
+				Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+					for _, name := range cmd.StringSlice("category") {
+						if !cfg.HasCategory(name) {
+							return ctx, styledExit(fmt.Errorf("unknown category %q; valid: %s", name, strings.Join(cfg.CategoryNames(), ", ")), 2)
+						}
+					}
+					return ctx, nil
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					opts := store.ListOptions{
+						IncludeExcluded: listAll,
+						Categories:      cmd.StringSlice("category"),
+					}
+					if err := listPark(cfg, opts, listJSON, cmd.Root().Writer); err != nil {
+						return styledExit(err, 1)
 					}
 					return nil
 				},

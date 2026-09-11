@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -163,5 +164,38 @@ func TestDefaultConfigUsesProvidedRoot(t *testing.T) {
 	cfg := DefaultConfig("/custom/root")
 	if cfg.Categories[0].Path != "/custom/root/_inbox" {
 		t.Errorf("DefaultConfig path = %q, want %q", cfg.Categories[0].Path, "/custom/root/_inbox")
+	}
+}
+
+func TestDefaultConfigExcludesArchive(t *testing.T) {
+	cfg := DefaultConfig("/tmp/park")
+
+	archive, ok := cfg.CategoryByName("archive")
+	if !ok {
+		t.Fatal("archive category missing from default config")
+	}
+	if !archive.Excluded {
+		t.Error("archive Excluded = false, want true")
+	}
+
+	for _, name := range []string{"inbox", "projects", "areas"} {
+		cat, _ := cfg.CategoryByName(name)
+		if cat.Excluded {
+			t.Errorf("%s Excluded = true, want false", name)
+		}
+	}
+}
+
+func TestDumpIncludesExcluded(t *testing.T) {
+	cfg := DefaultConfig("/tmp/park")
+	out, err := cfg.Dump()
+	if err != nil {
+		t.Fatalf("Dump() error = %v", err)
+	}
+	if !strings.Contains(out, "excluded = true") {
+		t.Errorf("Dump() missing excluded marker:\n%s", out)
+	}
+	if strings.Contains(out, "excluded = false") {
+		t.Errorf("Dump() emitted excluded = false for a non-excluded category:\n%s", out)
 	}
 }

@@ -127,7 +127,7 @@ The JSON output includes the canonical category enum, field kinds, the date form
 | `new [title]` | park a new note (alias `add`) |
 | `list [--all] [-c <cat>] [--json]` | list parked notes grouped by category (alias `ls`) |
 | `assist` | open the tabbed TUI browser |
-| `show <file>` | glamour-render a note, no TUI |
+| `show <file> [--plain]` | render a note to the terminal (plain when piped, or with `--plain`) |
 | `reclassify <file> -c <cat>` | reclassify a note (alias `recat`) |
 | `config` | print the default TOML config |
 | `schema` | print the frontmatter schema contract |
@@ -193,6 +193,14 @@ synopsis: dashboard caching rework
 ```
 
 `schema_version` tracks the frontmatter contract exposed by `park schema`, so consumers can detect drift.
+
+### `park show` options
+
+| option | purpose |
+|--------|---------|
+| `--plain` | force plain text output (no ANSI); auto-selected when stdout is not a terminal |
+
+`park show` renders a note's frontmatter summary and body through glamour. When stdout is not a terminal (piped to a file, a pager, or another process) it automatically emits plain text with no ANSI escape codes, so captured output stays readable; `--plain` forces that mode even on a terminal. `park assist` applies the same rule to the note it opens after the TUI exits.
 
 ### Ingestion
 
@@ -288,6 +296,14 @@ Automation does not have to stop at ingestion. A scheduled job or agent can recl
 ```bash
 # Move everything older than 30 days from inbox to archive
 find "$PARK_ROOT/_inbox" -name "*.md" -mtime +30 -exec park reclassify {} -c archive \;
+```
+
+### Read a note from an agent
+
+`park show` writes to stdout and drops styling when output is redirected, so captured text is clean:
+
+```bash
+park show inbox-note.md | grep -i "deadline"
 ```
 
 ## Configuration

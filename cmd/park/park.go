@@ -35,6 +35,17 @@ func stdinIsTTY() bool {
 	return isTerminal(os.Stdin)
 }
 
+// writerIsTTY reports whether w is connected to an interactive terminal. A
+// writer that is not an *os.File (a buffer, a pipe) is treated as
+// non-terminal so callers fall back to plain output.
+func writerIsTTY(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	return isTerminal(f)
+}
+
 // draftFromCmd builds a note.Draft from the CLI flags and positional args.
 func draftFromCmd(cmd *cli.Command) note.Draft {
 	d := note.Draft{
@@ -181,7 +192,7 @@ func assistPark(cfg *config.Config, w io.Writer) error {
 		return fmt.Errorf("unexpected model type from assist")
 	}
 	if final.ViewFile != "" {
-		if err := render.ShowFile(final.ViewFile, w); err != nil {
+		if err := render.ShowFile(final.ViewFile, w, !writerIsTTY(w)); err != nil {
 			return err
 		}
 	}

@@ -142,6 +142,49 @@ func TestShowMissingFile(t *testing.T) {
 	}
 }
 
+func TestShowPlainFlag(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_inbox"), "plain-note.md", "inbox", "a plain note")
+
+	out, _, err := runPark(t, root, "show", "plain-note.md", "--plain")
+	if err != nil {
+		t.Fatalf("show --plain error = %v", err)
+	}
+	assertPlainShow(t, out, "a plain note")
+}
+
+// TestShowNonTTYIsPlain verifies plain output is auto-selected when the
+// writer is not a terminal; runPark wires a strings.Builder as cmd.Writer,
+// which writerIsTTY treats as non-terminal.
+func TestShowNonTTYIsPlain(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_inbox"), "piped-note.md", "inbox", "a piped note")
+
+	out, _, err := runPark(t, root, "show", "piped-note.md")
+	if err != nil {
+		t.Fatalf("show error = %v", err)
+	}
+	assertPlainShow(t, out, "a piped note")
+}
+
+func assertPlainShow(t *testing.T, out, synopsis string) {
+	t.Helper()
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("plain show output contains ANSI escapes:\n%q", out)
+	}
+	for _, want := range []string{synopsis, "body"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestStyledExit(t *testing.T) {
 	err := styledExit(errors.New("boom"), 7)
 	if err == nil {

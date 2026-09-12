@@ -57,6 +57,7 @@ func newCommand() *cli.Command {
 		schemaJSON           bool
 		listJSON             bool
 		listAll              bool
+		showPlain            bool
 	)
 
 	defaultRoot := os.Getenv("PARK_ROOT")
@@ -294,6 +295,13 @@ func newCommand() *cli.Command {
 				Name:      "show",
 				Usage:     "render a note to the terminal",
 				ArgsUsage: "<file>",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:        "plain",
+						Destination: &showPlain,
+						Usage:       "force plain text output (default when output is not a terminal)",
+					},
+				},
 				Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 					if cmd.NArg() < 1 {
 						return ctx, styledExit(fmt.Errorf("usage: park show <file>"), 2)
@@ -305,7 +313,8 @@ func newCommand() *cli.Command {
 					if err != nil {
 						return styledExit(err, 1)
 					}
-					if err := render.ShowFile(path, cmd.Root().Writer); err != nil {
+					plain := showPlain || !writerIsTTY(cmd.Root().Writer)
+					if err := render.ShowFile(path, cmd.Root().Writer, plain); err != nil {
 						return styledExit(err, 1)
 					}
 					return nil

@@ -60,7 +60,7 @@ func (c *Config) LoadConfig(root, configPath string) error {
 }
 
 // Validate checks that the config is well-formed.
-func (c Config) Validate() error {
+func (c *Config) Validate() error {
 	if c.DefaultCategory == "" {
 		return fmt.Errorf("default_category is required")
 	}
@@ -90,7 +90,7 @@ func (c Config) Validate() error {
 }
 
 // HasCategory reports whether a category with the given name exists.
-func (c Config) HasCategory(name string) bool {
+func (c *Config) HasCategory(name string) bool {
 	for _, cl := range c.Categories {
 		if cl.Name == name {
 			return true
@@ -100,7 +100,7 @@ func (c Config) HasCategory(name string) bool {
 }
 
 // CategoryByName returns the category with the given name, or zero value if not found.
-func (c Config) CategoryByName(name string) (Category, bool) {
+func (c *Config) CategoryByName(name string) (Category, bool) {
 	for _, cl := range c.Categories {
 		if cl.Name == name {
 			return cl, true
@@ -109,18 +109,8 @@ func (c Config) CategoryByName(name string) (Category, bool) {
 	return Category{}, false
 }
 
-// CategoryByKey returns the category with the given hotkey, or zero value if not found.
-func (c Config) CategoryByKey(key string) (Category, bool) {
-	for _, cl := range c.Categories {
-		if cl.Key == key {
-			return cl, true
-		}
-	}
-	return Category{}, false
-}
-
 // CategoryNames returns all category names in order.
-func (c Config) CategoryNames() []string {
+func (c *Config) CategoryNames() []string {
 	names := make([]string, len(c.Categories))
 	for i, cl := range c.Categories {
 		names[i] = cl.Name
@@ -128,19 +118,20 @@ func (c Config) CategoryNames() []string {
 	return names
 }
 
+// UnknownCategoryError is the single constructor for "unknown category"
+// errors, so every command and package reports the same message.
+func (c *Config) UnknownCategoryError(name string) error {
+	return fmt.Errorf("unknown category %q; valid: %s", name, strings.Join(c.CategoryNames(), ", "))
+}
+
 // Dump returns the config as a TOML string.
-func (c Config) Dump() (string, error) {
+func (c *Config) Dump() (string, error) {
 	var b strings.Builder
 	enc := toml.NewEncoder(&b)
 	if err := enc.Encode(c); err != nil {
 		return "", fmt.Errorf("encode config: %w", err)
 	}
 	return b.String(), nil
-}
-
-// DefaultConfigPath returns the default path to the park configuration file.
-func DefaultConfigPath() string {
-	return DefaultConfigPathFor(DefaultRootPath())
 }
 
 // DefaultConfigPathFor returns the default configuration path under the given

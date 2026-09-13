@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/polymorcodeus/park/internal/config"
@@ -229,6 +230,85 @@ func TestReclassifyDestinationExists(t *testing.T) {
 	}
 }
 
+func TestReclassifyByLiteralPath(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+	if _, _, err := Init(cfg); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	path, err := note.Create(cfg, note.Draft{Filename: "Literal Path", Metadata: note.Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	filename := filepath.Base(path)
+
+	if err := Reclassify(cfg, path, "projects"); err != nil {
+		t.Fatalf("Reclassify(%q) error = %v", path, err)
+	}
+
+	projectsPath := filepath.Join(tmp, "_projects", filename)
+	if _, err := os.Stat(projectsPath); err != nil {
+		t.Errorf("file missing in projects: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file still exists in inbox: %v", err)
+	}
+}
+
+func TestReclassifyByRelativePath(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+	if _, _, err := Init(cfg); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	path, err := note.Create(cfg, note.Draft{Filename: "Relative Path", Metadata: note.Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	filename := filepath.Base(path)
+
+	t.Chdir(tmp)
+	rel := filepath.Join("_inbox", filename)
+
+	if err := Reclassify(cfg, rel, "projects"); err != nil {
+		t.Fatalf("Reclassify(%q) error = %v", rel, err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmp, "_projects", filename)); err != nil {
+		t.Errorf("file missing in projects: %v", err)
+	}
+}
+
+func TestReclassifyRelativePathSameCategory(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+	if _, _, err := Init(cfg); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	path, err := note.Create(cfg, note.Draft{Filename: "Same Relative", Metadata: note.Metadata{Synopsis: "synopsis", Source: "test", Category: "inbox"}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	filename := filepath.Base(path)
+
+	t.Chdir(tmp)
+	rel := filepath.Join("_inbox", filename)
+
+	err = Reclassify(cfg, rel, "inbox")
+	if err == nil {
+		t.Fatal("expected error when reclassifying a relative path to the same category")
+	}
+	if !strings.Contains(err.Error(), "already in") {
+		t.Errorf("error = %q, want already-in message", err.Error())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("original file was moved or removed: %v", err)
+	}
+}
+
 func TestScan(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.DefaultConfig(tmp)
@@ -294,5 +374,28 @@ func TestResolvePath(t *testing.T) {
 	_, err = ResolvePath(cfg, "missing.md")
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("ResolvePath(missing) error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestResolvePathDoesNotDoubleJoin(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig(tmp)
+	if _, _, err := Init(cfg); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	// A naive category join of "_inbox/nested.md" would land on this nested
+	// file; a path-like argument must be treated as a literal path instead.
+	nested := filepath.Join(cfg.Categories[0].Path, "_inbox")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "nested.md"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := ResolvePath(cfg, filepath.Join("_inbox", "nested.md"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ResolvePath(path) error = %v, want os.ErrNotExist (path must not double-join)", err)
 	}
 }

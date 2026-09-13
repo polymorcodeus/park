@@ -118,6 +118,8 @@ The JSON output includes the canonical category enum, field kinds, the date form
 
 `park reclassify <file> -c <category>` rewrites frontmatter *before* moving the file. A failed move never leaves a note in a half-updated state. Same-category moves are rejected.
 
+`<file>` follows the same resolution rules as `park show`: a bare basename is searched across every configured category folder (archive included), or a path (absolute, or relative to the working directory) is used as-is. A value containing a path separator is treated as a literal path and is never joined onto a category folder, so passing a path cannot double-join into `category/path/to/file.md`.
+
 ## Commands
 
 | command | purpose |

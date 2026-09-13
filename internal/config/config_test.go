@@ -120,26 +120,6 @@ func TestCategoryByName(t *testing.T) {
 	}
 }
 
-func TestCategoryByKey(t *testing.T) {
-	cfg := Config{
-		DefaultCategory: "inbox",
-		Categories: []Category{
-			{Name: "inbox", Key: "i"},
-			{Name: "projects", Key: "p"},
-		},
-	}
-
-	cat, ok := cfg.CategoryByKey("p")
-	if !ok || cat.Name != "projects" {
-		t.Errorf("CategoryByKey(p) = %+v, %v; want projects", cat, ok)
-	}
-
-	_, ok = cfg.CategoryByKey("z")
-	if ok {
-		t.Error("CategoryByKey(z) found unexpected category")
-	}
-}
-
 func TestCategoryNames(t *testing.T) {
 	cfg := Config{
 		Categories: []Category{
@@ -156,6 +136,25 @@ func TestCategoryNames(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("CategoryNames()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestUnknownCategoryError(t *testing.T) {
+	cfg := Config{
+		Categories: []Category{
+			{Name: "inbox"},
+			{Name: "projects"},
+		},
+	}
+
+	err := cfg.UnknownCategoryError("nope")
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	for _, want := range []string{`unknown category "nope"`, "inbox", "projects"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("UnknownCategoryError() = %q, want substring %q", err.Error(), want)
 		}
 	}
 }

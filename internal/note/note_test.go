@@ -249,6 +249,35 @@ func TestIngestFileDirectorySource(t *testing.T) {
 	}
 }
 
+func TestIngestFileExpandsTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory available")
+	}
+	src, err := os.CreateTemp(home, "park-tilde-test-*.md")
+	if err != nil {
+		t.Fatalf("CreateTemp() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(src.Name()) })
+	if _, err := src.WriteString("# Tilde\n\nbody\n"); err != nil {
+		t.Fatalf("WriteString() error = %v", err)
+	}
+	if err := src.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	d, err := IngestFile(Draft{FromFile: "~/" + filepath.Base(src.Name())})
+	if err != nil {
+		t.Fatalf("IngestFile() error = %v", err)
+	}
+	if d.FromFile != src.Name() {
+		t.Errorf("FromFile = %q, want expanded %q", d.FromFile, src.Name())
+	}
+	if d.Body != "# Tilde\n\nbody" {
+		t.Errorf("body = %q, want file body", d.Body)
+	}
+}
+
 func TestDraftH1(t *testing.T) {
 	tests := []struct {
 		name        string

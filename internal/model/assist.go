@@ -55,12 +55,19 @@ func humanAge(t time.Time) string {
 	}
 }
 
+// categoryBinding pairs a category name with the key binding that both
+// renders it in help and matches it in Update, so the two can never drift.
+type categoryBinding struct {
+	name    string
+	binding key.Binding
+}
+
 // keyMap defines the key bindings for the park TUI.
 type keyMap struct {
 	View             key.Binding
 	CycleNext        key.Binding
 	CyclePrev        key.Binding
-	CategoryBindings []key.Binding
+	CategoryBindings []categoryBinding
 	Help             key.Binding
 	Quit             key.Binding
 }
@@ -72,7 +79,11 @@ func (k keyMap) Primary() []key.Binding {
 
 // Categories returns reclassify/category action shortcuts shown only in full help.
 func (k keyMap) Categories() []key.Binding {
-	return k.CategoryBindings
+	bindings := make([]key.Binding, len(k.CategoryBindings))
+	for i, cb := range k.CategoryBindings {
+		bindings[i] = cb.binding
+	}
+	return bindings
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -113,15 +124,18 @@ var keys = keyMap{
 // configured category that has a non-empty Key.
 func newKeyMap(cfg *config.Config) keyMap {
 	km := keys
-	km.CategoryBindings = make([]key.Binding, 0, len(cfg.Categories))
+	km.CategoryBindings = make([]categoryBinding, 0, len(cfg.Categories))
 	for _, cl := range cfg.Categories {
 		if cl.Key == "" {
 			continue
 		}
-		km.CategoryBindings = append(km.CategoryBindings, key.NewBinding(
-			key.WithKeys(cl.Key),
-			key.WithHelp(cl.Key, cl.Name),
-		))
+		km.CategoryBindings = append(km.CategoryBindings, categoryBinding{
+			name: cl.Name,
+			binding: key.NewBinding(
+				key.WithKeys(cl.Key),
+				key.WithHelp(cl.Key, cl.Name),
+			),
+		})
 	}
 	return km
 }
@@ -160,8 +174,8 @@ func NewAssistModel(cfg *config.Config) (AssistModel, error) {
 		keys:        newKeyMap(cfg),
 		help:        help.New(),
 		styles:      s,
-		list:        list.New(nil, delegate, minWidth, minHeight),
-		width:       minWidth,
+		list:        list.New(nil, delegate, maxWidth, defaultHeight),
+		width:       maxWidth,
 	}
 	m.list.SetFilteringEnabled(true)
 	m.list.SetShowHelp(false)
@@ -241,7 +255,7 @@ const maxListHeight = 28
 func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = min(minWidth, msg.Width)
+		m.width = min(maxWidth, msg.Width)
 		m.help.SetWidth(m.width)
 		m.list.SetSize(m.width, min(max(5, msg.Height-6), maxListHeight))
 
@@ -255,7 +269,6 @@ func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.list.SetItems(msg.items)
-		m.list.Title = fmt.Sprintf("%s (%d)", currentCategory, len(msg.items))
 		m.err = nil
 		return m, nil
 
@@ -294,13 +307,16 @@ func (m AssistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		default:
-			if cl, ok := m.cfg.CategoryByKey(msg.String()); ok {
+			for _, cb := range m.keys.CategoryBindings {
+				if !key.Matches(msg, cb.binding) {
+					continue
+				}
 				currentCategory := m.cfg.Categories[m.categoryIdx].Name
-				if cl.Name == currentCategory {
-					m.err = fmt.Errorf("already in %s", cl.Name)
+				if cb.name == currentCategory {
+					m.err = fmt.Errorf("already in %s", cb.name)
 					return m, nil
 				}
-				return m, m.reclassifyCmd(cl.Name)
+				return m, m.reclassifyCmd(cb.name)
 			}
 		}
 	}

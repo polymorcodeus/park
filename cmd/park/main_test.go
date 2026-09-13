@@ -122,6 +122,41 @@ func TestReclassifySameCategory(t *testing.T) {
 	}
 }
 
+func TestReclassifyAcceptsLiteralPath(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	notePath := filepath.Join(root, "_inbox", "path-note.md")
+	writeNote(t, filepath.Join(root, "_inbox"), "path-note.md", "inbox", "a path note")
+
+	if _, _, err := runPark(t, root, "reclassify", notePath, "--category", "projects"); err != nil {
+		t.Fatalf("reclassify by literal path error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "_projects", "path-note.md")); err != nil {
+		t.Errorf("file missing in projects: %v", err)
+	}
+	if _, err := os.Stat(notePath); !os.IsNotExist(err) {
+		t.Errorf("file still exists in inbox: %v", err)
+	}
+}
+
+func TestReclassifyAcceptsRelativePath(t *testing.T) {
+	root := t.TempDir()
+	if _, _, err := runPark(t, root, "init"); err != nil {
+		t.Fatalf("init error = %v", err)
+	}
+	writeNote(t, filepath.Join(root, "_inbox"), "rel-note.md", "inbox", "a relative note")
+
+	t.Chdir(root)
+	if _, _, err := runPark(t, root, "reclassify", filepath.Join("_inbox", "rel-note.md"), "--category", "areas"); err != nil {
+		t.Fatalf("reclassify by relative path error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "_areas", "rel-note.md")); err != nil {
+		t.Errorf("file missing in areas: %v", err)
+	}
+}
+
 func TestShowMissingArg(t *testing.T) {
 	_, _, err := runPark(t, t.TempDir(), "show")
 	if err == nil {

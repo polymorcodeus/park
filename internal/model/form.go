@@ -119,7 +119,7 @@ func NewNoteFormModel(cfg *config.Config, seed note.Draft) (NoteFormModel, error
 		}
 	}
 	if idx < 0 {
-		return NoteFormModel{}, fmt.Errorf("unknown category %q", seed.Category)
+		return NoteFormModel{}, cfg.UnknownCategoryError(seed.Category)
 	}
 
 	s := newStyles()
@@ -177,7 +177,7 @@ func NewNoteFormModel(cfg *config.Config, seed note.Draft) (NoteFormModel, error
 		bodyCursorReset: seed.Body != "",
 		styles:          s,
 		keys:            noteKeys,
-		width:           minWidth,
+		width:           maxWidth,
 	}
 	m, _ = m.updateFocus()
 	return m, nil
@@ -346,13 +346,13 @@ func (m NoteFormModel) Init() tea.Cmd {
 func (m NoteFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = min(minWidth, msg.Width)
+		m.width = min(maxWidth, msg.Width)
 		inputWidth := max(20, m.width-20)
 		for i := range m.inputs {
 			m.inputs[i].SetWidth(inputWidth)
 		}
 		m.bodyInput.SetWidth(inputWidth)
-		m.bodyInput.SetHeight(minHeight)
+		m.bodyInput.SetHeight(defaultHeight)
 
 	case tea.BackgroundColorMsg:
 		m.bodyInput.SetStyles(textarea.DefaultStyles(msg.IsDark()))

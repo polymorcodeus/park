@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/polymorcodeus/park/internal/config"
@@ -180,7 +179,7 @@ func newCommand() *cli.Command {
 				Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 					for _, name := range cmd.StringSlice("category") {
 						if !cfg.HasCategory(name) {
-							return ctx, styledExit(fmt.Errorf("unknown category %q; valid: %s", name, strings.Join(cfg.CategoryNames(), ", ")), 2)
+							return ctx, styledExit(cfg.UnknownCategoryError(name), 2)
 						}
 					}
 					return ctx, nil
@@ -231,8 +230,7 @@ func newCommand() *cli.Command {
 				Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 					if newCategory != "" {
 						if !cfg.HasCategory(newCategory) {
-							err := fmt.Errorf("--category must be one of %s (got %q)", strings.Join(cfg.CategoryNames(), ", "), newCategory)
-							return ctx, styledExit(err, 1)
+							return ctx, styledExit(cfg.UnknownCategoryError(newCategory), 1)
 						}
 					}
 					return ctx, nil
@@ -263,7 +261,7 @@ func newCommand() *cli.Command {
 						return ctx, styledExit(fmt.Errorf("usage: park reclassify <file> --category <category>"), 2)
 					}
 					if !cfg.HasCategory(reclassifyCategory) {
-						return ctx, styledExit(fmt.Errorf("unknown category %q; valid: %s", reclassifyCategory, strings.Join(cfg.CategoryNames(), ", ")), 2)
+						return ctx, styledExit(cfg.UnknownCategoryError(reclassifyCategory), 2)
 					}
 					return ctx, nil
 				},

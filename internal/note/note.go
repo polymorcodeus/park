@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,11 +26,6 @@ type Note struct {
 	Body string
 	Path string
 	Metadata
-}
-
-// HasCompleteMetadata reports whether all frontmatter fields are present.
-func (n Note) HasCompleteMetadata() bool {
-	return n.IsComplete()
 }
 
 // Draft is the creation-time representation of a note. Created may be empty
@@ -240,11 +236,17 @@ type Result struct {
 
 // IngestFile reads the source file into the draft body when FromFile is set
 // and Body is empty, merging any file frontmatter metadata with the draft's
-// existing metadata (draft values take precedence).
+// existing metadata (draft values take precedence). FromFile is expanded once
+// here, so parsing, form preview, and source removal all see the same path.
 func IngestFile(d Draft) (Draft, error) {
 	if d.FromFile == "" || d.Body != "" {
 		return d, nil
 	}
+	expanded, err := fs.ExpandPath(d.FromFile)
+	if err != nil {
+		return Draft{}, fmt.Errorf("expand source path %q: %w", d.FromFile, err)
+	}
+	d.FromFile = expanded
 	parsed, err := Parse(d.FromFile)
 	if err != nil {
 		return Draft{}, fmt.Errorf("parse source file %q: %w", d.FromFile, err)
@@ -292,16 +294,7 @@ func Add(cfg *config.Config, d Draft) (Result, error) {
 			if d.Synopsis == "" {
 				d.Synopsis = parsed.Synopsis
 			}
-			var missing []string
-			if d.Category == "" {
-				missing = append(missing, "category")
-			}
-			if d.Source == "" {
-				missing = append(missing, "source")
-			}
-			if d.Synopsis == "" {
-				missing = append(missing, "synopsis")
-			}
+			missing := slices.DeleteFunc(d.Metadata.MissingFields(), func(f string) bool { return f == "created" })
 			if len(missing) > 0 {
 				return Result{}, fmt.Errorf("incomplete frontmatter: missing %s", strings.Join(missing, ", "))
 			}
@@ -348,7 +341,7 @@ func Create(cfg *config.Config, d Draft) (string, error) {
 
 	cl, ok := cfg.CategoryByName(d.Category)
 	if !ok {
-		return "", fmt.Errorf("unknown category %q; valid: %s", d.Category, strings.Join(cfg.CategoryNames(), ", "))
+		return "", cfg.UnknownCategoryError(d.Category)
 	}
 
 	path := filepath.Join(cl.Path, d.Slug()+".md")

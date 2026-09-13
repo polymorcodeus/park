@@ -6,7 +6,7 @@
 
 # park
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/polymorcodeus/park)](https://go.dev/) [![Build Status](https://img.shields.io/github/actions/workflow/status/polymorcodeus/park/ci.yml?branch=main)](https://github.com/polymorcodeus/park/actions)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/polymorcodeus/park)](https://go.dev/) [![Build Status](https://img.shields.io/github/actions/workflow/status/polymorcodeus/park/ci.yml?branch=main)](https://github.com/polymorcodeus/park/actions) [![License](https://img.shields.io/github/license/polymorcodeus/park)](./LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/polymorcodeus/park/schema.svg)](https://pkg.go.dev/github.com/polymorcodeus/park/schema)
 
 **A parking lot for markdown notes, organized as IPAA (Inbox / Projects / Areas / Archive).**
 
@@ -20,7 +20,7 @@ Park surfaces notes mid-coding-session and keeps the Inbox skim-able through fro
 park init
 park new "revisit dashboard caching approach" \
   -s "current TTL feels wrong, worth a spike" -src my-cli-tool
-park new "keep an eye on API rate limits" -c area
+park new "keep an eye on API rate limits" -c areas
 park list
 park assist
 park reclassify 1767786622-idea.md -c projects
@@ -33,6 +33,8 @@ Quick install (downloads the latest release to `/usr/local/bin`):
 ```bash
 curl -sSL https://raw.githubusercontent.com/polymorcodeus/park/main/install.sh | bash
 ```
+
+The `go install` and source builds require Go 1.26.4+.
 
 Or install via Go:
 
@@ -47,8 +49,6 @@ git clone https://github.com/polymorcodeus/park.git
 cd park
 make build
 ```
-
-Requires Go 1.26.4+.
 
 ## Setup
 
@@ -81,9 +81,11 @@ Notes are plain markdown files with frontmatter, one folder per category:
 └── _archive/           # inactive, retained for reference
 ```
 
+Layout shown for the Linux default root; on macOS the root is `~/Library/Application Support/park`.
+
 ### Frontmatter
 
-```yaml
+```text
 ---
 category: inbox
 created: 2026-07-16
@@ -92,14 +94,14 @@ synopsis: current TTL feels wrong, worth a spike
 ---
 ```
 
-Frontmatter is parsed line-by-line — no YAML dependency. Four fields:
+Frontmatter is parsed line-by-line -- no YAML dependency. Four fields:
 
 | field | purpose |
 |-------|---------|
 | `category` | redundant with folder, kept so ad-hoc files still self-describe |
 | `created` | ISO 8601 date, set at park time |
 | `source` | where the note came from (repo, chat, stray idea) |
-| `synopsis` | one-line summary — the entire mechanism that makes triage fast |
+| `synopsis` | one-line summary -- the entire mechanism that makes triage fast |
 
 `synopsis` is the key design decision: read it, decide whether to open the file, move on. `source` lets future-you reconstruct *why* a note exists without re-reading it.
 
@@ -118,6 +120,8 @@ The JSON output includes the canonical category enum, field kinds, the date form
 
 `park reclassify <file> -c <category>` rewrites frontmatter *before* moving the file. A failed move never leaves a note in a half-updated state. Same-category moves are rejected.
 
+`<file>` follows the same resolution rules as `park show`: a bare basename is searched across every configured category folder (archive included), or a path (absolute, or relative to the working directory) is used as-is. A value containing a path separator is treated as a literal path and is never joined onto a category folder, so passing a path cannot double-join into `category/path/to/file.md`.
+
 ## Commands
 
 | command | purpose |
@@ -129,7 +133,7 @@ The JSON output includes the canonical category enum, field kinds, the date form
 | `assist` | open the tabbed TUI browser |
 | `show <file> [--plain]` | render a note to the terminal (plain when piped, or with `--plain`) |
 | `reclassify <file> -c <cat>` | reclassify a note (alias `recat`) |
-| `config` | print the default TOML config |
+| `config` | print the loaded TOML config |
 | `schema` | print the frontmatter schema contract |
 | `schema --json` | print the contract as machine-readable JSON |
 
@@ -213,7 +217,7 @@ park new -f ~/Downloads/meeting-notes.md \
   -s "Q3 planning recap" -src "Slack export"
 ```
 
-The file is read, wrapped with frontmatter, and moved into the park. The original is left untouched.
+The file is read, wrapped with frontmatter, and moved into the park; the original file is removed.
 
 **From stdin** (pipe):
 
@@ -233,8 +237,7 @@ When stdin is not a terminal, `park new` reads the entire input as the note body
 
 ## TUI
 
-`park assist` opens a CLI tabbed browser across all configured categories and allows for interactively moving documents
-between categories.
+`park assist` opens a tabbed TUI browser across all configured categories, with interactive moves between categories.
 
 | key | action |
 |-----|--------|
@@ -277,7 +280,7 @@ park new -f /tmp/claude-output.md \
   -s "database schema redesign proposal" -src "Claude"
 ```
 
-The file is read, frontmatter is injected, and it is moved into the category folder. The original file stays in place.
+The file is moved into the category folder and the original is removed, same as any `--from-file` ingest; see [Ingestion](#ingestion).
 
 ### Verify setup from an agent
 
@@ -308,7 +311,7 @@ park show inbox-note.md | grep -i "deadline"
 
 ## Configuration
 
-Config lives at `<park-root>/config` as TOML. Run `park config` to print the default:
+Config lives at `<park-root>/config` as TOML. Run `park config` to print the loaded config (the built-in default when no config file exists):
 
 ```toml
 default_category = "inbox"
@@ -357,3 +360,9 @@ git clone https://github.com/polymorcodeus/park.git
 cd park
 make check    # fmt, vet, lint, test
 ```
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full setup.
+
+## License
+
+[MIT](./LICENSE)

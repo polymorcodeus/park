@@ -47,7 +47,7 @@ func selectedCategories(cfg *config.Config, opts ListOptions) ([]config.Category
 	want := make(map[string]struct{}, len(opts.Categories))
 	for _, name := range opts.Categories {
 		if _, ok := cfg.CategoryByName(name); !ok {
-			return nil, fmt.Errorf("unknown category %q; valid: %s", name, strings.Join(cfg.CategoryNames(), ", "))
+			return nil, cfg.UnknownCategoryError(name)
 		}
 		want[name] = struct{}{}
 	}

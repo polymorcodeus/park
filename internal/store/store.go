@@ -69,7 +69,7 @@ func Check(cfg *config.Config) ([]string, error) {
 func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 	cl, ok := cfg.CategoryByName(categoryName)
 	if !ok {
-		return nil, fmt.Errorf("unknown category %q; valid: %s", categoryName, strings.Join(cfg.CategoryNames(), ", "))
+		return nil, cfg.UnknownCategoryError(categoryName)
 	}
 
 	entries, err := os.ReadDir(cl.Path)
@@ -107,42 +107,41 @@ func Scan(cfg *config.Config, categoryName string) ([]Item, error) {
 	return items, nil
 }
 
-// Reclassify moves a file (looked up by filename across all category folders)
-// into the target category folder and rewrites its frontmatter category field
-// to match. This is the "triage decision" primitive everything else builds on.
+// Reclassify moves a file into the target category folder and rewrites its
+// frontmatter category field to match. The file may be named by a bare
+// basename (searched across all category folders) or by a literal path, using
+// the same resolution rules as ResolvePath. This is the "triage decision"
+// primitive everything else builds on.
 func Reclassify(cfg *config.Config, filename string, targetCategory string) error {
 	cl, ok := cfg.CategoryByName(targetCategory)
 	if !ok {
-		return fmt.Errorf("unknown category %q; valid: %s", targetCategory, strings.Join(cfg.CategoryNames(), ", "))
+		return cfg.UnknownCategoryError(targetCategory)
 	}
 
-	var src string
-	var n note.Note
-	for _, c := range cfg.Categories {
-		candidate := filepath.Join(c.Path, filename)
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			src = candidate
-			var parseErr error
-			n, parseErr = note.Parse(candidate)
-			if parseErr != nil {
-				return fmt.Errorf("parse frontmatter for %q: %w", candidate, parseErr)
-			}
-			break
-		}
+	src, err := ResolvePath(cfg, filename)
+	if err != nil {
+		return err
 	}
-	if src == "" {
-		return os.ErrNotExist
+	src, err = filepath.Abs(src)
+	if err != nil {
+		return fmt.Errorf("resolve path %q: %w", filename, err)
 	}
 
 	if filepath.Dir(src) == cl.Path {
 		return fmt.Errorf("already in %s", targetCategory)
 	}
 
+	n, err := note.Parse(src)
+	if err != nil {
+		return fmt.Errorf("parse frontmatter for %q: %w", src, err)
+	}
+
 	n.Category = targetCategory
-	dst := filepath.Join(cl.Path, filename)
+	base := filepath.Base(src)
+	dst := filepath.Join(cl.Path, base)
 
 	if _, err := os.Stat(dst); err == nil {
-		return fmt.Errorf("already exists in %s: %s", targetCategory, filename)
+		return fmt.Errorf("already exists in %s: %s", targetCategory, base)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("check destination %q: %w", dst, err)
 	}
@@ -171,12 +170,17 @@ func FormatInitResult(created, existed []string) string {
 	return msg
 }
 
-// ResolvePath accepts either a bare filename (searched across all category
-// folders) or a full path used as-is. It returns os.ErrNotExist when no file
-// can be resolved.
+// ResolvePath accepts either a bare basename (searched across all category
+// folders) or a path used as-is. A basename that contains a path separator is
+// treated as a literal path and is never joined onto a category folder, so a
+// path can never double-join. It returns os.ErrNotExist when no file can be
+// resolved.
 func ResolvePath(cfg *config.Config, filename string) (string, error) {
 	if _, err := os.Stat(filename); err == nil {
 		return filename, nil
+	}
+	if strings.ContainsAny(filename, `/\`) {
+		return "", os.ErrNotExist
 	}
 	for _, cl := range cfg.Categories {
 		p := filepath.Join(cl.Path, filename)

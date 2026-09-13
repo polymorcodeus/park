@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	minWidth  = 120
-	minHeight = 20
+	maxWidth      = 120
+	defaultHeight = 20
 )
 
 type styles struct {

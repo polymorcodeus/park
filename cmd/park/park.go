@@ -124,11 +124,9 @@ func runNoteForm(cfg *config.Config, w io.Writer, seed *note.Draft) error {
 // a short human-readable summary.
 func schemaPark(asJSON bool, w io.Writer) error {
 	if asJSON {
-		data, err := json.MarshalIndent(schema.Describe(), "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshal schema: %w", err)
-		}
-		if _, err := fmt.Fprintln(w, string(data)); err != nil {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(schema.Describe()); err != nil {
 			return fmt.Errorf("write schema output: %w", err)
 		}
 		return nil

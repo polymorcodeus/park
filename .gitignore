@@ -1,0 +1,14 @@
+# Build output
+/park
+/dist/
+
+# Test coverage (make test-cover)
+coverage.out
+coverage.html
+
+# Compiled test binaries (go test -c)
+*.test
+
+# Go workspace
+go.work
+go.work.sum
